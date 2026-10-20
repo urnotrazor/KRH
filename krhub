@@ -1,0 +1,1171 @@
+--[[
+	Teleport GUI  (LocalScript)
+	Put in: StarterPlayer > StarterPlayerScripts
+
+	Tabs:
+	  Normal  - type a username / display name. A player card appears with
+	            TELEPORT, SPECTATE and ESP buttons for that person.
+	  Friends - your Roblox friends who are in the same server. Each row has
+	            TP, SPECTATE and ESP buttons.
+	  All     - one switch to ESP (chams) everyone in the server, plus a
+	            toggle to show or hide the name tags above ESP'd players.
+
+	Controls:
+	  - Enter in the box teleports to the matched player
+	  - Drag the title bar to move
+	  - "-" minimizes, "x" hides it
+	  - K (or RightShift) toggles show/hide
+
+	ESP note:
+	  ESP state lives in plain tables (espOn / espAll), completely separate
+	  from the GUI. Closing or reopening the window never touches it, and
+	  every time the window opens the buttons are re-synced from that state.
+]]
+
+local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+
+local player    = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local VirtualUser = game:GetService("VirtualUser")
+local currentCamera = game.Workspace.CurrentCamera
+
+player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.zero, currentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.zero, currentCamera.CFrame)
+
+    print("player sucessfully unidled")
+end)
+
+print("script ran")
+
+--------------------------------------------------------------------
+-- Theme (black & white)
+--------------------------------------------------------------------
+local C = {
+	black      = Color3.fromRGB(0, 0, 0),
+	bg         = Color3.fromRGB(8, 8, 8),
+	panel      = Color3.fromRGB(22, 22, 22),
+	panelHover = Color3.fromRGB(42, 42, 42),
+	accent     = Color3.fromRGB(255, 255, 255),
+	text       = Color3.fromRGB(240, 240, 240),
+	muted      = Color3.fromRGB(125, 125, 125),
+	ok         = Color3.fromRGB(255, 255, 255),
+	err        = Color3.fromRGB(160, 160, 160),
+}
+
+local FULL_SIZE = UDim2.fromOffset(320, 340)
+local MINI_SIZE = UDim2.fromOffset(320, 42)
+
+--------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------
+local function tween(obj, t, props, style, dir)
+	local tw = TweenService:Create(
+		obj,
+		TweenInfo.new(t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out),
+		props
+	)
+	tw:Play()
+	return tw
+end
+
+local function corner(parent, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function label(parent, props)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamMedium
+	l.TextColor3 = C.text
+	l.TextSize = 14
+	for k, v in pairs(props) do l[k] = v end
+	l.Parent = parent
+	return l
+end
+
+-- Hover + press "bounce" for any button
+local function makeInteractive(btn)
+	local scale = Instance.new("UIScale")
+	scale.Parent = btn
+	btn.MouseEnter:Connect(function() tween(scale, 0.15, {Scale = 1.05}) end)
+	btn.MouseLeave:Connect(function() tween(scale, 0.15, {Scale = 1}) end)
+	btn.MouseButton1Down:Connect(function() tween(scale, 0.08, {Scale = 0.94}) end)
+	btn.MouseButton1Up:Connect(function() tween(scale, 0.15, {Scale = 1.05}, Enum.EasingStyle.Back) end)
+end
+
+-- Generic button. style = "primary" (white) or "ghost" (dark, outlined)
+local function makeButton(parent, text, style, textSize)
+	local b = Instance.new("TextButton")
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = textSize or 12
+	b.AutoButtonColor = false
+	b.BorderSizePixel = 0
+	if style == "primary" then
+		b.BackgroundColor3 = C.accent
+		b.TextColor3 = C.black
+	else
+		b.BackgroundColor3 = C.panelHover
+		b.TextColor3 = C.text
+		local s = stroke(b, C.accent, 1, 0.6)
+		s.Name = "Stroke"
+	end
+	b.Parent = parent
+	corner(b, 8)
+	makeInteractive(b)
+	return b
+end
+
+-- Toggle look for ghost buttons (filled white when active)
+local function setToggleStyle(btn, active, activeText, idleText)
+	if not btn then return end
+	btn.Text = active and activeText or idleText
+	tween(btn, 0.2, {
+		BackgroundColor3 = active and C.accent or C.panelHover,
+		TextColor3 = active and C.black or C.text,
+	})
+	local s = btn:FindFirstChild("Stroke")
+	if s then tween(s, 0.2, {Transparency = active and 1 or 0.6}) end
+end
+
+local function trim(s)
+	return (tostring(s or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+--------------------------------------------------------------------
+-- Friend detection
+--------------------------------------------------------------------
+local friendCache = {}   -- [UserId] = true/false
+local refreshFriends     -- defined further down (needs the GUI)
+
+local function checkFriend(p)
+	if p == player then return end
+	task.spawn(function()
+		local ok, res = pcall(function()
+			return player:IsFriendsWith(p.UserId)
+		end)
+		friendCache[p.UserId] = (ok and res) or false
+		if refreshFriends then refreshFriends() end
+	end)
+end
+
+--------------------------------------------------------------------
+-- Player lookup (exact -> prefix -> contains, on Name and DisplayName)
+--------------------------------------------------------------------
+local function findPlayer(query)
+	query = trim(query)
+	if query == "" then return nil end
+
+	local prefix, contains
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= player then
+			local n, d = p.Name:lower(), p.DisplayName:lower()
+			if n == query or d == query then return p end
+			if not prefix and (n:sub(1, #query) == query or d:sub(1, #query) == query) then
+				prefix = p
+			end
+			if not contains and (n:find(query, 1, true) or d:find(query, 1, true)) then
+				contains = p
+			end
+		end
+	end
+	return prefix or contains
+end
+
+--------------------------------------------------------------------
+-- GUI
+--------------------------------------------------------------------
+local old = playerGui:FindFirstChild("TeleportGui")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "TeleportGui"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
+
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.Position = UDim2.fromScale(0.5, 0.5)
+main.Size = FULL_SIZE
+main.BackgroundColor3 = C.bg
+main.BorderSizePixel = 0
+main.ClipsDescendants = true
+main.Parent = gui
+corner(main, 12)
+
+local mainScale = Instance.new("UIScale")
+mainScale.Scale = 0
+mainScale.Parent = main
+
+-- White border that pulses
+local border = stroke(main, C.accent, 2, 0.1)
+
+-- Title bar
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 42)
+titleBar.BackgroundColor3 = C.panel
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+
+label(titleBar, {
+	Text = "🍆  KRHUB",
+	Font = Enum.Font.GothamBold,
+	TextSize = 15,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(14, 0),
+	Size = UDim2.fromOffset(110, 42),
+})
+
+-- Shows what's currently active (spectating / ESP)
+local titleSub = label(titleBar, {
+	Text = "",
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(124, 0),
+	Size = UDim2.new(1, -124 - 76, 1, 0),
+})
+
+local function titleButton(text, xOffset)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(26, 26)
+	b.Position = UDim2.new(1, xOffset, 0.5, -13)
+	b.BackgroundColor3 = C.panelHover
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 16
+	b.TextColor3 = C.text
+	b.AutoButtonColor = false
+	b.Parent = titleBar
+	corner(b, 7)
+	makeInteractive(b)
+	return b
+end
+
+local minBtn   = titleButton("–", -68)
+local closeBtn = titleButton("×", -36)
+
+-- Content (everything under the title bar)
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
+content.Position = UDim2.fromOffset(0, 42)
+content.Size = UDim2.new(1, 0, 1, -42)
+content.Parent = main
+
+--------------------------------------------------------------------
+-- Tab bar (Normal / Friends / All)
+--------------------------------------------------------------------
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.Position = UDim2.fromOffset(18, 8)
+tabBar.Size = UDim2.new(1, -36, 0, 32)
+tabBar.BackgroundColor3 = C.panel
+tabBar.BorderSizePixel = 0
+tabBar.Parent = content
+corner(tabBar, 8)
+
+local indicator = Instance.new("Frame")
+indicator.Name = "Indicator"
+indicator.Position = UDim2.new(0, 3, 0, 3)
+indicator.Size = UDim2.new(1 / 3, -6, 1, -6)
+indicator.BackgroundColor3 = C.accent
+indicator.BorderSizePixel = 0
+indicator.Parent = tabBar
+corner(indicator, 6)
+
+local function tabButton(text, index)
+	local b = Instance.new("TextButton")
+	b.Position = UDim2.fromScale((index - 1) / 3, 0)
+	b.Size = UDim2.fromScale(1 / 3, 1)
+	b.BackgroundTransparency = 1
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 13
+	b.TextColor3 = C.muted
+	b.AutoButtonColor = false
+	b.ZIndex = 2
+	b.Parent = tabBar
+	return b
+end
+
+local normalTab  = tabButton("Normal", 1)
+local friendsTab = tabButton("Friends", 2)
+local allTab     = tabButton("All", 3)
+normalTab.TextColor3 = C.black -- active tab sits on the white indicator
+
+--------------------------------------------------------------------
+-- Shared status line
+--------------------------------------------------------------------
+local status = label(content, {
+	Text = "Ready",
+	Font = Enum.Font.Gotham,
+	TextSize = 13,
+	TextColor3 = C.muted,
+	Position = UDim2.new(0, 18, 1, -30),
+	Size = UDim2.new(1, -36, 0, 22),
+})
+
+local function setStatus(text, color)
+	status.Text = text
+	status.TextColor3 = color or C.muted
+	status.TextTransparency = 1
+	status.Position = UDim2.new(0, 18, 1, -24)
+	tween(status, 0.25, {TextTransparency = 0})
+	tween(status, 0.3, {Position = UDim2.new(0, 18, 1, -30)}, Enum.EasingStyle.Back)
+end
+
+--------------------------------------------------------------------
+-- Shared UI references (filled in once the pages are built)
+--------------------------------------------------------------------
+local updateUI                 -- re-syncs every button from the real state
+local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
+local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
+local cardSpecBtn, cardEspBtn  -- buttons on the player card
+local allEspBtn, namesBtn, allInfo -- widgets on the All tab
+local currentMatch             -- player currently shown on the card
+
+--------------------------------------------------------------------
+-- ESP (chams) - state is independent from the GUI
+--------------------------------------------------------------------
+local espOn      = {}     -- [UserId] = true  (individually enabled)
+local espAll     = false  -- ESP for everyone
+local highlights = {}     -- [UserId] = Highlight instance
+local espNames   = true   -- show name tags above ESP'd players
+local nameTags   = {}     -- [UserId] = BillboardGui
+
+local function wantsEsp(p)
+	return espAll or espOn[p.UserId] == true
+end
+
+-- Makes the world match the state for one player (create / keep / remove)
+local function applyHighlight(p)
+	if p == player then return end
+
+	local hl   = highlights[p.UserId]
+	local char = p.Character
+
+	if wantsEsp(p) and char and p.Parent then
+		if not hl or hl.Parent ~= char then
+			if hl then hl:Destroy() end
+			hl = Instance.new("Highlight")
+			hl.Name = "TeleportGuiESP"
+			hl.FillColor = C.accent
+			hl.FillTransparency = 0.5
+			hl.OutlineColor = C.accent
+			hl.OutlineTransparency = 0
+			hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+			hl.Adornee = char
+			hl.Parent = char
+			highlights[p.UserId] = hl
+		end
+	elseif hl then
+		hl:Destroy()
+		highlights[p.UserId] = nil
+	end
+end
+
+-- Name tag above the head (only while ESP is on AND names are enabled)
+local function applyNameTag(p)
+	if p == player then return end
+
+	local tag  = nameTags[p.UserId]
+	local char = p.Character
+	local part = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+
+	if espNames and wantsEsp(p) and char and part and p.Parent then
+		if not tag or tag.Parent ~= char then
+			if tag then tag:Destroy() end
+			tag = Instance.new("BillboardGui")
+			tag.Name = "TeleportGuiESPName"
+			tag.AlwaysOnTop = true
+			tag.Size = UDim2.fromOffset(200, 24)
+			tag.StudsOffset = Vector3.new(0, 2.6, 0)
+			tag.LightInfluence = 0
+
+			local nameLabel = Instance.new("TextLabel")
+			nameLabel.Name = "NameLabel"
+			nameLabel.BackgroundTransparency = 1
+			nameLabel.Size = UDim2.fromScale(1, 1)
+			nameLabel.Font = Enum.Font.GothamBold
+			nameLabel.TextSize = 14
+			nameLabel.TextColor3 = C.accent
+			nameLabel.TextStrokeColor3 = C.black
+			nameLabel.TextStrokeTransparency = 0.2
+			nameLabel.Parent = tag
+
+			tag.Adornee = part
+			tag.Parent = char
+			nameTags[p.UserId] = tag
+		end
+		tag.Adornee = part
+		local nameLabel = tag:FindFirstChild("NameLabel")
+		if nameLabel then nameLabel.Text = p.DisplayName end
+	elseif tag then
+		tag:Destroy()
+		nameTags[p.UserId] = nil
+	end
+end
+
+-- Makes the world match the state for one player (highlight + name tag)
+local function applyEsp(p)
+	applyHighlight(p)
+	applyNameTag(p)
+end
+
+local function applyEspToAll()
+	for _, p in ipairs(Players:GetPlayers()) do applyEsp(p) end
+end
+
+local function countEsp()
+	local n = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= player and wantsEsp(p) then n += 1 end
+	end
+	return n
+end
+
+local function toggleEsp(p)
+	if not p or not p.Parent then
+		setStatus("Player not found", C.err)
+		return
+	end
+	if espAll then
+		setStatus("ESP everyone is on (All tab)", C.muted)
+		return
+	end
+	if espOn[p.UserId] then
+		espOn[p.UserId] = nil
+		applyEsp(p)
+		setStatus("ESP off for " .. p.DisplayName, C.muted)
+	else
+		espOn[p.UserId] = true
+		applyEsp(p)
+		setStatus("ESP on for " .. p.DisplayName, C.ok)
+	end
+	if updateUI then updateUI() end
+end
+
+local function setEspAll(state)
+	espAll = state
+	applyEspToAll()
+	if updateUI then updateUI() end
+	setStatus(state and "ESP on for everyone" or "ESP off for everyone", state and C.ok or C.muted)
+end
+
+local function setEspNames(state)
+	espNames = state
+	applyEspToAll()
+	if updateUI then updateUI() end
+	setStatus(state and "ESP names shown" or "ESP names hidden", state and C.ok or C.muted)
+end
+
+local function clearAllEsp()
+	espAll = false
+	table.clear(espOn)
+	applyEspToAll()
+	if updateUI then updateUI() end
+	setStatus("All ESP cleared", C.muted)
+end
+
+-- Keep ESP alive through respawns, joins and leaves
+local function setupEspPlayer(p)
+	if p == player then return end
+	p.CharacterAdded:Connect(function()
+		task.defer(applyEsp, p)
+	end)
+	applyEsp(p)
+end
+
+Players.PlayerAdded:Connect(function(p)
+	setupEspPlayer(p)
+	if updateUI then updateUI() end
+end)
+Players.PlayerRemoving:Connect(function(p)
+	local hl = highlights[p.UserId]
+	if hl then hl:Destroy() end
+	highlights[p.UserId] = nil
+	local tag = nameTags[p.UserId]
+	if tag then tag:Destroy() end
+	nameTags[p.UserId] = nil
+	espOn[p.UserId] = nil
+	task.defer(function()
+		if updateUI then updateUI() end
+	end)
+end)
+for _, p in ipairs(Players:GetPlayers()) do setupEspPlayer(p) end
+
+-- Safety net: re-applies ESP once a second in case the game removed a highlight
+task.spawn(function()
+	while gui.Parent do
+		task.wait(1)
+		applyEspToAll()
+	end
+end)
+
+--------------------------------------------------------------------
+-- Teleport logic
+--------------------------------------------------------------------
+local busy = false
+local tpBtn -- the TELEPORT button on the player card (assigned below)
+
+local function teleportTo(target)
+	if busy then return end
+	busy = true
+
+	if not target or not target.Parent then
+		setStatus("Player not found", C.err)
+		busy = false
+		return
+	end
+
+	local myChar    = player.Character
+	local myRoot    = myChar and myChar:FindFirstChild("HumanoidRootPart")
+	local theirChar = target.Character
+	local theirRoot = theirChar and theirChar:FindFirstChild("HumanoidRootPart")
+
+	if not myRoot then
+		setStatus("Your character isn't loaded", C.err)
+		busy = false
+		return
+	end
+	if not theirRoot then
+		setStatus(target.DisplayName .. " has no character", C.err)
+		busy = false
+		return
+	end
+
+	if tpBtn then tpBtn.Text = "TELEPORTING..." end
+
+	-- Land just behind the target
+	myChar:PivotTo(theirRoot.CFrame * CFrame.new(0, 0, 3))
+
+	setStatus("Teleported to " .. target.DisplayName, C.ok)
+	task.delay(0.6, function()
+		if tpBtn then tpBtn.Text = "TELEPORT" end
+		busy = false
+	end)
+end
+
+--------------------------------------------------------------------
+-- Spectate logic
+--------------------------------------------------------------------
+local spectating            -- the Player being watched, or nil
+local specConns = {}
+
+local function stopSpectating(silent)
+	for _, c in ipairs(specConns) do c:Disconnect() end
+	table.clear(specConns)
+	spectating = nil
+
+	local cam = workspace.CurrentCamera
+	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if cam and hum then cam.CameraSubject = hum end
+
+	if updateUI then updateUI() end
+	if not silent then setStatus("Stopped spectating", C.muted) end
+end
+
+local function startSpectating(target)
+	if not target or not target.Parent then
+		setStatus("Player not found", C.err)
+		return
+	end
+	if spectating then stopSpectating(true) end
+	spectating = target
+
+	local function attach(char)
+		if not char then return end
+		local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+		if hum and spectating == target then
+			workspace.CurrentCamera.CameraSubject = hum
+		end
+	end
+
+	task.spawn(attach, target.Character)
+
+	-- Follow them through respawns
+	table.insert(specConns, target.CharacterAdded:Connect(function(c)
+		task.spawn(attach, c)
+	end))
+	-- Stop if they leave
+	table.insert(specConns, Players.PlayerRemoving:Connect(function(p)
+		if p == target then
+			stopSpectating(true)
+			setStatus(target.DisplayName .. " left the server", C.muted)
+		end
+	end))
+	-- Stop if you respawn (camera resets to you anyway)
+	table.insert(specConns, player.CharacterAdded:Connect(function()
+		stopSpectating(true)
+	end))
+
+	if updateUI then updateUI() end
+	setStatus("Spectating " .. target.DisplayName, C.ok)
+end
+
+local function toggleSpectate(target)
+	if not target then
+		setStatus("Player not found", C.err)
+		return
+	end
+	if spectating == target then
+		stopSpectating()
+	else
+		startSpectating(target)
+	end
+end
+
+--------------------------------------------------------------------
+-- Page: Normal  (input + player card)
+--------------------------------------------------------------------
+local PAGE_POS  = UDim2.fromOffset(18, 50)
+local PAGE_SIZE = UDim2.new(1, -36, 1, -86)
+
+local normalPage = Instance.new("Frame")
+normalPage.Name = "NormalPage"
+normalPage.BackgroundTransparency = 1
+normalPage.Position = PAGE_POS
+normalPage.Size = PAGE_SIZE
+normalPage.Parent = content
+
+label(normalPage, {
+	Text = "Username or display name",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(0, 6),
+	Size = UDim2.new(1, 0, 0, 16),
+})
+
+local inputBox = Instance.new("TextBox")
+inputBox.Name = "UsernameInput"
+inputBox.Position = UDim2.fromOffset(0, 28)
+inputBox.Size = UDim2.new(1, 0, 0, 38)
+inputBox.BackgroundColor3 = C.panel
+inputBox.PlaceholderText = "e.g. Roblox"
+inputBox.PlaceholderColor3 = C.muted
+inputBox.Text = ""
+inputBox.ClearTextOnFocus = false
+inputBox.Font = Enum.Font.GothamMedium
+inputBox.TextSize = 15
+inputBox.TextColor3 = C.text
+inputBox.TextXAlignment = Enum.TextXAlignment.Left
+inputBox.Parent = normalPage
+corner(inputBox, 8)
+local inputPad = Instance.new("UIPadding")
+inputPad.PaddingLeft = UDim.new(0, 12)
+inputPad.Parent = inputBox
+local inputStroke = stroke(inputBox, C.muted, 1.5, 0.6)
+
+inputBox.Focused:Connect(function()
+	tween(inputStroke, 0.2, {Color = C.accent, Transparency = 0.1})
+end)
+inputBox.FocusLost:Connect(function()
+	tween(inputStroke, 0.2, {Color = C.muted, Transparency = 0.6})
+end)
+
+-- Hint shown while there's no match
+local hint = label(normalPage, {
+	Text = "Type a name to teleport, spectate or ESP",
+	Font = Enum.Font.Gotham,
+	TextSize = 13,
+	TextColor3 = C.muted,
+	Position = UDim2.fromOffset(0, 90),
+	Size = UDim2.new(1, 0, 0, 30),
+})
+
+-- Player card (appears when the typed name matches someone)
+local card = Instance.new("Frame")
+card.Name = "PlayerCard"
+card.Position = UDim2.fromOffset(0, 76)
+card.Size = UDim2.new(1, 0, 0, 96)
+card.BackgroundColor3 = C.panel
+card.BorderSizePixel = 0
+card.Visible = false
+card.Parent = normalPage
+corner(card, 10)
+stroke(card, C.accent, 1, 0.8)
+
+local cardScale = Instance.new("UIScale")
+cardScale.Parent = card
+
+local cardName = label(card, {
+	Text = "",
+	Font = Enum.Font.GothamBold,
+	TextSize = 15,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(12, 8),
+	Size = UDim2.new(1, -24, 0, 20),
+})
+local cardSub = label(card, {
+	Text = "",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(12, 28),
+	Size = UDim2.new(1, -24, 0, 16),
+})
+
+-- Three equal buttons across the card (10px edges, 5px gaps)
+local function cardButtonPos(i)
+	return UDim2.new(i / 3, 10 - 5 * i, 0, 52)
+end
+local CARD_BTN_SIZE = UDim2.new(1 / 3, -10, 0, 34)
+
+tpBtn = makeButton(card, "TELEPORT", "primary", 11)
+tpBtn.Name = "TeleportButton"
+tpBtn.Position = cardButtonPos(0)
+tpBtn.Size = CARD_BTN_SIZE
+
+cardSpecBtn = makeButton(card, "SPECTATE", "ghost", 11)
+cardSpecBtn.Name = "SpectateButton"
+cardSpecBtn.Position = cardButtonPos(1)
+cardSpecBtn.Size = CARD_BTN_SIZE
+
+cardEspBtn = makeButton(card, "ESP", "ghost", 11)
+cardEspBtn.Name = "EspButton"
+cardEspBtn.Position = cardButtonPos(2)
+cardEspBtn.Size = CARD_BTN_SIZE
+
+local function setCard(match)
+	local changed = (match ~= currentMatch)
+	currentMatch = match
+
+	if match then
+		cardName.Text = match.DisplayName
+		cardSub.Text = "@" .. match.Name .. (friendCache[match.UserId] and "  •  friend" or "")
+		hint.Visible = false
+		if changed or not card.Visible then
+			card.Visible = true
+			cardScale.Scale = 0.92
+			tween(cardScale, 0.3, {Scale = 1}, Enum.EasingStyle.Back)
+		end
+	else
+		card.Visible = false
+		hint.Visible = true
+	end
+	if updateUI then updateUI() end
+end
+
+inputBox:GetPropertyChangedSignal("Text"):Connect(function()
+	if inputBox.Text == "" then
+		setCard(nil)
+		setStatus("Ready", C.muted)
+		return
+	end
+	local match = findPlayer(inputBox.Text)
+	setCard(match)
+	if match then
+		setStatus(("Match: %s (@%s)"):format(match.DisplayName, match.Name), C.ok)
+	else
+		setStatus("No matching player", C.muted)
+	end
+end)
+
+-- If the matched player leaves, refresh the card
+Players.PlayerRemoving:Connect(function()
+	task.defer(function()
+		if inputBox.Text ~= "" then setCard(findPlayer(inputBox.Text)) end
+	end)
+end)
+
+tpBtn.MouseButton1Click:Connect(function()
+	if currentMatch then teleportTo(currentMatch) end
+end)
+cardSpecBtn.MouseButton1Click:Connect(function()
+	toggleSpectate(currentMatch)
+end)
+cardEspBtn.MouseButton1Click:Connect(function()
+	toggleEsp(currentMatch)
+end)
+inputBox.FocusLost:Connect(function(enterPressed)
+	if enterPressed then
+		local target = currentMatch or findPlayer(inputBox.Text)
+		if target then teleportTo(target) else setStatus("Player not found", C.err) end
+	end
+end)
+
+--------------------------------------------------------------------
+-- Page: Friends
+--------------------------------------------------------------------
+local friendsPage = Instance.new("Frame")
+friendsPage.Name = "FriendsPage"
+friendsPage.BackgroundTransparency = 1
+friendsPage.Position = PAGE_POS
+friendsPage.Size = PAGE_SIZE
+friendsPage.Visible = false
+friendsPage.Parent = content
+
+local friendsHeader = label(friendsPage, {
+	Text = "Friends in this server",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(0, 6),
+	Size = UDim2.new(1, 0, 0, 16),
+})
+
+local friendList = Instance.new("ScrollingFrame")
+friendList.Name = "FriendList"
+friendList.Position = UDim2.fromOffset(0, 28)
+friendList.Size = UDim2.new(1, 0, 1, -28)
+friendList.BackgroundTransparency = 1
+friendList.BorderSizePixel = 0
+friendList.ScrollBarThickness = 3
+friendList.ScrollBarImageColor3 = C.accent
+friendList.CanvasSize = UDim2.new()
+friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+friendList.Parent = friendsPage
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 6)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Parent = friendList
+
+local emptyLabel = label(friendsPage, {
+	Text = "No friends in this server",
+	Font = Enum.Font.Gotham,
+	TextSize = 13,
+	TextColor3 = C.muted,
+	Position = UDim2.fromOffset(0, 60),
+	Size = UDim2.new(1, 0, 0, 30),
+	Visible = false,
+})
+
+local function makeFriendRow(p, order)
+	local row = Instance.new("Frame")
+	row.Name = "Friend_" .. p.UserId
+	row.Size = UDim2.new(1, -6, 0, 42)
+	row.BackgroundColor3 = C.panel
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = order
+	row.Parent = friendList
+	corner(row, 8)
+
+	label(row, {
+		Text = p.DisplayName,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(12, 4),
+		Size = UDim2.new(1, -164, 0, 20),
+	})
+	label(row, {
+		Text = "@" .. p.Name,
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(12, 22),
+		Size = UDim2.new(1, -164, 0, 14),
+	})
+
+	-- right to left: ESP | SPECTATE | TP
+	local espBtn = makeButton(row, "ESP", "ghost", 10)
+	espBtn.Size = UDim2.fromOffset(40, 26)
+	espBtn.Position = UDim2.new(1, -46, 0.5, -13)
+
+	local specBtn = makeButton(row, "SPECTATE", "ghost", 9)
+	specBtn.Size = UDim2.fromOffset(62, 26)
+	specBtn.Position = UDim2.new(1, -112, 0.5, -13)
+
+	local tp = makeButton(row, "TP", "primary", 11)
+	tp.Size = UDim2.fromOffset(34, 26)
+	tp.Position = UDim2.new(1, -150, 0.5, -13)
+
+	tp.MouseButton1Click:Connect(function() teleportTo(p) end)
+	specBtn.MouseButton1Click:Connect(function() toggleSpectate(p) end)
+	espBtn.MouseButton1Click:Connect(function() toggleEsp(p) end)
+
+	rowSpecButtons[p.UserId] = specBtn
+	rowEspButtons[p.UserId]  = espBtn
+	tween(row, 0.3, {BackgroundTransparency = 0})
+end
+
+--------------------------------------------------------------------
+-- Page: All  (ESP everyone)
+--------------------------------------------------------------------
+local allPage = Instance.new("Frame")
+allPage.Name = "AllPage"
+allPage.BackgroundTransparency = 1
+allPage.Position = PAGE_POS
+allPage.Size = PAGE_SIZE
+allPage.Visible = false
+allPage.Parent = content
+
+label(allPage, {
+	Text = "ESP for everyone",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(0, 6),
+	Size = UDim2.new(1, 0, 0, 16),
+})
+
+allEspBtn = makeButton(allPage, "ESP EVERYONE: OFF", "ghost", 13)
+allEspBtn.Name = "EspAllButton"
+allEspBtn.Position = UDim2.fromOffset(0, 28)
+allEspBtn.Size = UDim2.new(1, 0, 0, 36)
+
+namesBtn = makeButton(allPage, "NAMES: ON", "ghost", 12)
+namesBtn.Name = "EspNamesButton"
+namesBtn.Position = UDim2.fromOffset(0, 70)
+namesBtn.Size = UDim2.new(1, 0, 0, 34)
+
+label(allPage, {
+	Text = "ESP keeps running when you close this window.",
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(0, 134),
+	Size = UDim2.new(1, 0, 0, 18),
+})
+
+allInfo = label(allPage, {
+	Text = "ESP active on 0 players",
+	Font = Enum.Font.GothamMedium,
+	TextSize = 13,
+	TextColor3 = C.text,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(0, 112),
+	Size = UDim2.new(1, 0, 0, 20),
+})
+
+local clearBtn = makeButton(allPage, "CLEAR ALL ESP", "ghost", 12)
+clearBtn.Position = UDim2.fromOffset(0, 162)
+clearBtn.Size = UDim2.new(1, 0, 0, 34)
+
+allEspBtn.MouseButton1Click:Connect(function() setEspAll(not espAll) end)
+namesBtn.MouseButton1Click:Connect(function() setEspNames(not espNames) end)
+clearBtn.MouseButton1Click:Connect(clearAllEsp)
+
+--------------------------------------------------------------------
+-- Sync every button from the real state
+--------------------------------------------------------------------
+updateUI = function()
+	-- player card
+	local onCardSpec = spectating ~= nil and spectating == currentMatch
+	setToggleStyle(cardSpecBtn, onCardSpec, "STOP", "SPECTATE")
+	local onCardEsp = currentMatch ~= nil and currentMatch.Parent ~= nil and wantsEsp(currentMatch)
+	setToggleStyle(cardEspBtn, onCardEsp, "ESP ON", "ESP")
+
+	-- friend rows
+	for userId, btn in pairs(rowSpecButtons) do
+		local active = spectating ~= nil and spectating.UserId == userId
+		setToggleStyle(btn, active, "STOP", "SPECTATE")
+	end
+	for userId, btn in pairs(rowEspButtons) do
+		local p = Players:GetPlayerByUserId(userId)
+		setToggleStyle(btn, p ~= nil and wantsEsp(p), "ESP", "ESP")
+	end
+
+	-- All tab
+	setToggleStyle(allEspBtn, espAll, "ESP EVERYONE: ON", "ESP EVERYONE: OFF")
+	setToggleStyle(namesBtn, espNames, "NAMES: ON", "NAMES: OFF")
+	if allInfo then
+		local n = countEsp()
+		allInfo.Text = ("ESP active on %d player%s"):format(n, n == 1 and "" or "s")
+	end
+
+	-- title bar summary
+	local parts = {}
+	if spectating then table.insert(parts, "watching " .. spectating.DisplayName) end
+	if espAll then
+		table.insert(parts, "ESP: all")
+	else
+		local n = countEsp()
+		if n > 0 then table.insert(parts, "ESP: " .. n) end
+	end
+	titleSub.Text = table.concat(parts, "  |  ")
+end
+
+refreshFriends = function()
+	for _, child in ipairs(friendList:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	table.clear(rowSpecButtons)
+	table.clear(rowEspButtons)
+
+	local count = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= player and p.Parent and friendCache[p.UserId] then
+			count += 1
+			makeFriendRow(p, count)
+		end
+	end
+
+	emptyLabel.Visible = (count == 0)
+	friendsHeader.Text = ("Friends in this server (%d)"):format(count)
+	friendsTab.Text = count > 0 and ("Friends (%d)"):format(count) or "Friends"
+	updateUI()
+end
+
+Players.PlayerAdded:Connect(checkFriend)
+Players.PlayerRemoving:Connect(function(p)
+	friendCache[p.UserId] = nil
+	task.defer(refreshFriends)
+end)
+for _, p in ipairs(Players:GetPlayers()) do checkFriend(p) end
+refreshFriends()
+
+--------------------------------------------------------------------
+-- Tab switching
+--------------------------------------------------------------------
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3}
+local TAB_BUTTONS = {Normal = normalTab, Friends = friendsTab, All = allTab}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage}
+local currentTab = "Normal"
+
+local function switchTab(name)
+	if name == currentTab then return end
+	local fromIdx, toIdx = TAB_INDEX[currentTab], TAB_INDEX[name]
+	local hidePage, showPage = TAB_PAGES[currentTab], TAB_PAGES[name]
+	currentTab = name
+
+	tween(indicator, 0.35, {
+		Position = UDim2.new((toIdx - 1) / 3, 3, 0, 3)
+	}, Enum.EasingStyle.Back)
+
+	for tabName, btn in pairs(TAB_BUTTONS) do
+		tween(btn, 0.2, {TextColor3 = (tabName == name) and C.black or C.muted})
+	end
+
+	hidePage.Visible = false
+	showPage.Position = UDim2.fromOffset(toIdx > fromIdx and 48 or -12, 50)
+	showPage.Visible = true
+	tween(showPage, 0.35, {Position = PAGE_POS})
+
+	if name == "Friends" then refreshFriends() end
+	updateUI()
+end
+
+normalTab.MouseButton1Click:Connect(function() switchTab("Normal") end)
+friendsTab.MouseButton1Click:Connect(function() switchTab("Friends") end)
+allTab.MouseButton1Click:Connect(function() switchTab("All") end)
+
+--------------------------------------------------------------------
+-- Minimize / close / toggle
+--------------------------------------------------------------------
+local minimized = false
+
+local function setMinimized(state)
+	minimized = state
+	minBtn.Text = state and "+" or "–"
+	if state then
+		content.Visible = false
+		tween(main, 0.35, {Size = MINI_SIZE}, Enum.EasingStyle.Back)
+	else
+		tween(main, 0.4, {Size = FULL_SIZE}, Enum.EasingStyle.Back)
+		task.delay(0.15, function()
+			if not minimized then content.Visible = true end
+		end)
+	end
+end
+
+minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
+
+local visible = true
+local function setVisible(state)
+	visible = state
+	if state then
+		main.Visible = true
+		tween(mainScale, 0.45, {Scale = 1}, Enum.EasingStyle.Back)
+		-- Re-sync every button with the real ESP / spectate state, so the
+		-- window always matches what is actually happening in the game.
+		updateUI()
+	else
+		local tw = tween(mainScale, 0.25, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+		tw.Completed:Connect(function()
+			if not visible then main.Visible = false end
+		end)
+		-- Note: ESP is intentionally NOT touched here. It keeps running.
+	end
+end
+
+closeBtn.MouseButton1Click:Connect(function()
+	setVisible(false) -- just hides it; press K to bring it back
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.K or input.KeyCode == Enum.KeyCode.RightShift then
+		setVisible(not visible)
+	end
+end)
+
+--------------------------------------------------------------------
+-- Dragging (by title bar)
+--------------------------------------------------------------------
+do
+	local dragging, dragStart, startPos
+
+	titleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			main.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+end
+
+--------------------------------------------------------------------
+-- Ambient animation: pulsing border
+--------------------------------------------------------------------
+local t = 0
+RunService.Heartbeat:Connect(function(dt)
+	if not gui.Parent then return end
+	t += dt
+	border.Thickness = 2 + math.sin(t * 2.5) * 0.7
+end)
+
+-- Intro pop-in
+tween(mainScale, 0.6, {Scale = 1}, Enum.EasingStyle.Back)
