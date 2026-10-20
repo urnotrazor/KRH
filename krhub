@@ -228,6 +228,14 @@ titleBar.Size = UDim2.new(1, 0, 0, 42)
 titleBar.BackgroundColor3 = C.panel
 titleBar.BorderSizePixel = 0
 titleBar.Parent = main
+corner(titleBar, 12)
+
+local titlePatch = Instance.new("Frame")
+titlePatch.Size = UDim2.new(1, 0, 0, 12)
+titlePatch.Position = UDim2.new(0, 0, 1, -12)
+titlePatch.BackgroundColor3 = C.panel
+titlePatch.BorderSizePixel = 0
+titlePatch.Parent = titleBar
 
 label(titleBar, {
 	Text = "🍆  KRHUB",
