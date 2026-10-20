@@ -3,12 +3,13 @@
 	Put in: StarterPlayer > StarterPlayerScripts
 
 	Tabs:
-	  Normal  - type a username / display name. A player card appears with
+	  Teleport - type a username / display name. A player card appears with
 	            TELEPORT, SPECTATE and ESP buttons for that person.
 	  Friends - your Roblox friends who are in the same server. Each row has
 	            TP, SPECTATE and ESP buttons.
-	  All     - one switch to ESP (chams) everyone in the server, plus a
-	            toggle to show or hide the name tags above ESP'd players.
+	  Misc    - scrollable. One switch to ESP (chams) everyone in the server,
+	            a toggle for the name tags above ESP'd players, and a
+	            walk speed slider at the bottom (scroll down to find it).
 
 	Controls:
 	  - Enter in the box teleports to the matched player
@@ -286,7 +287,7 @@ content.Size = UDim2.new(1, 0, 1, -42)
 content.Parent = main
 
 --------------------------------------------------------------------
--- Tab bar (Normal / Friends / All)
+-- Tab bar (Teleport / Friends / Misc)
 --------------------------------------------------------------------
 local tabBar = Instance.new("Frame")
 tabBar.Name = "TabBar"
@@ -321,9 +322,9 @@ local function tabButton(text, index)
 	return b
 end
 
-local normalTab  = tabButton("Normal", 1)
+local normalTab  = tabButton("Teleport", 1)
 local friendsTab = tabButton("Friends", 2)
-local allTab     = tabButton("All", 3)
+local allTab     = tabButton("Misc", 3)
 normalTab.TextColor3 = C.black -- active tab sits on the white indicator
 
 --------------------------------------------------------------------
@@ -354,7 +355,7 @@ local updateUI                 -- re-syncs every button from the real state
 local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
 local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
 local cardSpecBtn, cardEspBtn  -- buttons on the player card
-local allEspBtn, namesBtn, allInfo -- widgets on the All tab
+local allEspBtn, namesBtn, allInfo -- widgets on the Misc tab
 local currentMatch             -- player currently shown on the card
 
 --------------------------------------------------------------------
@@ -463,7 +464,7 @@ local function toggleEsp(p)
 		return
 	end
 	if espAll then
-		setStatus("ESP everyone is on (All tab)", C.muted)
+		setStatus("ESP everyone is on (Misc tab)", C.muted)
 		return
 	end
 	if espOn[p.UserId] then
@@ -921,45 +922,57 @@ local function makeFriendRow(p, order)
 end
 
 --------------------------------------------------------------------
--- Page: All  (ESP everyone)
+-- Page: Misc  (scrollable: ESP controls + walk speed slider)
 --------------------------------------------------------------------
-local allPage = Instance.new("Frame")
+local allPage = Instance.new("ScrollingFrame")
 allPage.Name = "AllPage"
 allPage.BackgroundTransparency = 1
+allPage.BorderSizePixel = 0
 allPage.Position = PAGE_POS
 allPage.Size = PAGE_SIZE
 allPage.Visible = false
+allPage.ScrollBarThickness = 3
+allPage.ScrollBarImageColor3 = C.accent
+allPage.ScrollingDirection = Enum.ScrollingDirection.Y
+allPage.CanvasSize = UDim2.new()
+allPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
 allPage.Parent = content
 
+local allLayout = Instance.new("UIListLayout")
+allLayout.Padding = UDim.new(0, 8)
+allLayout.SortOrder = Enum.SortOrder.LayoutOrder
+allLayout.Parent = allPage
+
+local allPad = Instance.new("UIPadding")
+allPad.PaddingBottom = UDim.new(0, 10)
+allPad.Parent = allPage
+
+local allOrder = 0
+local function nextOrder()
+	allOrder += 1
+	return allOrder
+end
+
+-- ESP section ------------------------------------------------------
 label(allPage, {
 	Text = "ESP for everyone",
 	Font = Enum.Font.Gotham,
 	TextSize = 12,
 	TextColor3 = C.muted,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(0, 6),
-	Size = UDim2.new(1, 0, 0, 16),
+	Size = UDim2.new(1, -8, 0, 16),
+	LayoutOrder = nextOrder(),
 })
 
 allEspBtn = makeButton(allPage, "ESP EVERYONE: OFF", "ghost", 13)
 allEspBtn.Name = "EspAllButton"
-allEspBtn.Position = UDim2.fromOffset(0, 28)
-allEspBtn.Size = UDim2.new(1, 0, 0, 36)
+allEspBtn.Size = UDim2.new(1, -8, 0, 36)
+allEspBtn.LayoutOrder = nextOrder()
 
 namesBtn = makeButton(allPage, "NAMES: ON", "ghost", 12)
 namesBtn.Name = "EspNamesButton"
-namesBtn.Position = UDim2.fromOffset(0, 70)
-namesBtn.Size = UDim2.new(1, 0, 0, 34)
-
-label(allPage, {
-	Text = "ESP keeps running when you close this window.",
-	Font = Enum.Font.Gotham,
-	TextSize = 11,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(0, 134),
-	Size = UDim2.new(1, 0, 0, 18),
-})
+namesBtn.Size = UDim2.new(1, -8, 0, 34)
+namesBtn.LayoutOrder = nextOrder()
 
 allInfo = label(allPage, {
 	Text = "ESP active on 0 players",
@@ -967,17 +980,181 @@ allInfo = label(allPage, {
 	TextSize = 13,
 	TextColor3 = C.text,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(0, 112),
-	Size = UDim2.new(1, 0, 0, 20),
+	Size = UDim2.new(1, -8, 0, 20),
+	LayoutOrder = nextOrder(),
+})
+
+label(allPage, {
+	Text = "ESP keeps running when you close this window.",
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Size = UDim2.new(1, -8, 0, 16),
+	LayoutOrder = nextOrder(),
 })
 
 local clearBtn = makeButton(allPage, "CLEAR ALL ESP", "ghost", 12)
-clearBtn.Position = UDim2.fromOffset(0, 162)
-clearBtn.Size = UDim2.new(1, 0, 0, 34)
+clearBtn.Size = UDim2.new(1, -8, 0, 34)
+clearBtn.LayoutOrder = nextOrder()
 
 allEspBtn.MouseButton1Click:Connect(function() setEspAll(not espAll) end)
 namesBtn.MouseButton1Click:Connect(function() setEspNames(not espNames) end)
 clearBtn.MouseButton1Click:Connect(clearAllEsp)
+
+-- Walk speed section (scroll down to find it) ----------------------
+label(allPage, {
+	Text = "Movement",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Size = UDim2.new(1, -8, 0, 16),
+	LayoutOrder = nextOrder(),
+})
+
+local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 0, 200, 16
+local customSpeed = nil -- nil = don't touch the game's WalkSpeed
+
+local function enforceSpeed()
+	if not customSpeed then return end
+	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if hum and hum.WalkSpeed ~= customSpeed then
+		hum.WalkSpeed = customSpeed
+	end
+end
+
+-- Keep the custom speed through respawns and games that reset it
+local speedConn
+local function hookCharacter(char)
+	if speedConn then speedConn:Disconnect() speedConn = nil end
+	local hum = char:WaitForChild("Humanoid", 10)
+	if not hum then return end
+	enforceSpeed()
+	speedConn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(enforceSpeed)
+end
+player.CharacterAdded:Connect(hookCharacter)
+if player.Character then task.spawn(hookCharacter, player.Character) end
+
+local speedBox = Instance.new("Frame")
+speedBox.Name = "WalkSpeedBox"
+speedBox.Size = UDim2.new(1, -8, 0, 74)
+speedBox.BackgroundColor3 = C.panel
+speedBox.BorderSizePixel = 0
+speedBox.LayoutOrder = nextOrder()
+speedBox.Parent = allPage
+corner(speedBox, 8)
+
+label(speedBox, {
+	Text = "Walk speed",
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(12, 8),
+	Size = UDim2.new(1, -90, 0, 18),
+})
+
+local speedValue = label(speedBox, {
+	Text = tostring(SPEED_DEFAULT),
+	Font = Enum.Font.GothamBold,
+	TextXAlignment = Enum.TextXAlignment.Right,
+	Position = UDim2.new(1, -72, 0, 8),
+	Size = UDim2.fromOffset(60, 18),
+})
+
+-- Invisible, taller hit area so the slider is easy to grab
+local sliderHit = Instance.new("TextButton")
+sliderHit.Name = "SliderHit"
+sliderHit.Text = ""
+sliderHit.AutoButtonColor = false
+sliderHit.BackgroundTransparency = 1
+sliderHit.Position = UDim2.new(0, 12, 0, 36)
+sliderHit.Size = UDim2.new(1, -24, 0, 28)
+sliderHit.Parent = speedBox
+
+local track = Instance.new("Frame")
+track.Position = UDim2.new(0, 0, 0.5, -3)
+track.Size = UDim2.new(1, 0, 0, 6)
+track.BackgroundColor3 = C.panelHover
+track.BorderSizePixel = 0
+track.Parent = sliderHit
+corner(track, 3)
+
+local fill = Instance.new("Frame")
+fill.Size = UDim2.fromScale(0, 1)
+fill.BackgroundColor3 = C.accent
+fill.BorderSizePixel = 0
+fill.Parent = track
+corner(fill, 3)
+
+local knob = Instance.new("Frame")
+knob.AnchorPoint = Vector2.new(0.5, 0.5)
+knob.Size = UDim2.fromOffset(16, 16)
+knob.Position = UDim2.fromScale(0, 0.5)
+knob.BackgroundColor3 = C.accent
+knob.BorderSizePixel = 0
+knob.ZIndex = 2
+knob.Parent = track
+corner(knob, 8)
+
+local function updateSliderVisual(value)
+	local alpha = (value - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
+	fill.Size = UDim2.fromScale(alpha, 1)
+	knob.Position = UDim2.fromScale(alpha, 0.5)
+	speedValue.Text = tostring(value)
+end
+updateSliderVisual(SPEED_DEFAULT)
+
+local function setSpeed(value)
+	value = math.clamp(math.round(value), SPEED_MIN, SPEED_MAX)
+	customSpeed = value
+	updateSliderVisual(value)
+	enforceSpeed()
+end
+
+local draggingSpeed = false
+
+local function setFromInput(input)
+	local alpha = math.clamp(
+		(input.Position.X - sliderHit.AbsolutePosition.X) / sliderHit.AbsoluteSize.X, 0, 1
+	)
+	setSpeed(SPEED_MIN + alpha * (SPEED_MAX - SPEED_MIN))
+end
+
+sliderHit.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
+		draggingSpeed = true
+		allPage.ScrollingEnabled = false -- don't scroll the page while sliding
+		setFromInput(input)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch) then
+		setFromInput(input)
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch) then
+		draggingSpeed = false
+		allPage.ScrollingEnabled = true
+		setStatus("Walk speed: " .. tostring(customSpeed), C.ok)
+	end
+end)
+
+local resetSpeedBtn = makeButton(allPage, "RESET WALK SPEED", "ghost", 12)
+resetSpeedBtn.Name = "ResetSpeedButton"
+resetSpeedBtn.Size = UDim2.new(1, -8, 0, 34)
+resetSpeedBtn.LayoutOrder = nextOrder()
+resetSpeedBtn.MouseButton1Click:Connect(function()
+	customSpeed = nil
+	updateSliderVisual(SPEED_DEFAULT)
+	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if hum then hum.WalkSpeed = SPEED_DEFAULT end
+	setStatus("Walk speed reset", C.muted)
+end)
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
@@ -999,7 +1176,7 @@ updateUI = function()
 		setToggleStyle(btn, p ~= nil and wantsEsp(p), "ESP", "ESP")
 	end
 
-	-- All tab
+	-- Misc tab
 	setToggleStyle(allEspBtn, espAll, "ESP EVERYONE: ON", "ESP EVERYONE: OFF")
 	setToggleStyle(namesBtn, espNames, "NAMES: ON", "NAMES: OFF")
 	if allInfo then
