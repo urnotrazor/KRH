@@ -1828,6 +1828,7 @@ u()
 _G.vcbSetMuted = function(muted)
     ah = muted
     ai(muted)
+	print(_G.vcbSetMuted)
 end
 end)
 
