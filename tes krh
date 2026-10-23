@@ -1931,6 +1931,7 @@ h.StateChanged:Connect(function()
         t.Visible = not ah
     end
 end)
+end)
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
