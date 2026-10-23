@@ -1713,7 +1713,7 @@ label(vcPage, {
 })
 
 label(vcPage, {
-    Text = "Voice Chat availability is controlled by Roblox account settings, permissions, and the current experience.",
+    Text = "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.",
     Font = Enum.Font.Gotham,
     TextSize = 11,
     TextColor3 = C.muted,
@@ -1724,7 +1724,7 @@ label(vcPage, {
     LayoutOrder = nextVCOrder(),
 })
 
-local vcInfoBtn = makeButton(vcPage, "CHECK VOICE CHAT INFO", "ghost", 12)
+local vcInfoBtn = makeButton(vcPage, "BYPASS VOICE CHAT", "ghost", 12)
 vcInfoBtn.Name = "VoiceChatInfoButton"
 vcInfoBtn.Size = UDim2.new(1, -8, 0, 36)
 vcInfoBtn.LayoutOrder = nextVCOrder()
@@ -1821,21 +1821,15 @@ task.wait(2)
 task.spawn(function()
     g:joinVoice()
 end)
+
+task.wait(1)
+u()
+
+_G.vcbSetMuted = function(muted)
+    ah = muted
+    ai(muted)
+end
 end)
-
-label(vcPage, {
-    Text = "This tab does not modify internal VoiceChatService connections or bypass Roblox voice restrictions.",
-    Font = Enum.Font.Gotham,
-    TextSize = 11,
-    TextColor3 = C.muted,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
-    Size = UDim2.new(1, -8, 0, 42),
-    LayoutOrder = nextVCOrder(),
-})
-
-
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
