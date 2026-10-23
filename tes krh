@@ -1844,14 +1844,6 @@ if ad then
     ad:Destroy()
 end
 
-local ae = Instance.new("ScreenGui")
-ae.Name = "CustomVoiceController"
-ae.ResetOnSpawn = false
-ae.IgnoreGuiInset = true
-ae.DisplayOrder = 999999
-ae.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ae.Parent = ac
-
 local af = Instance.new("TextButton")
 af.Name = "MicHitArea"
 af.Size = UDim2.new(0, c, 0, c)
@@ -1938,17 +1930,6 @@ h.StateChanged:Connect(function()
     if t and t.Parent then
         t.Visible = not ah
     end
-end)
-
-local af = Instance.new("TextButton")
-af.Name = "MicHitArea"
-
-af.MouseButton1Click:Connect(function()
-    ah = not ah
-    ai(ah)
-    vcbMuted = ah
-    vcbSetMicIcon(ah)
-end)
 end)
 
 --------------------------------------------------------------------
