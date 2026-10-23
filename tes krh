@@ -1825,28 +1825,6 @@ end)
 task.wait(1)
 u()
 
-local ah = false
-
-local ae = Instance.new("ScreenGui")
-ae.Name = "CustomVoiceController"
-ae.Parent = game:GetService("CoreGui")
-
-local af = Instance.new("TextButton")
-af.Name = "MicHitArea"
-af.Text = "Toggle Mute"
-af.Size = UDim2.new(0, 120, 0, 40)
-af.Position = UDim2.new(0, 20, 0, 20)
-af.Parent = ae
-
-local function ai(muted)
-    -- Isi fungsi mute yang sebenarnya di sini
-end
-
-af.MouseButton1Click:Connect(function()
-    ah = not ah
-    ai(ah)
-end)
-
 _G.vcbSetMuted = function(muted)
     ah = muted
     ai(muted)
