@@ -1836,6 +1836,7 @@ af.Parent = ae
 af.MouseButton1Click:Connect(function()
     ah = not ah
 end)
+end)
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
