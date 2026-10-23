@@ -1826,6 +1826,19 @@ task.wait(1)
 u()
 
 local ah = false
+            pcall(function()
+                ah = h:IsPublishPaused()
+            end)
+
+            local function ai(aj)
+                ag.Image = aj and o or p
+                if t and t.Parent then
+                    t.Visible = not aj
+                end
+                task.spawn(function()
+                    h:PublishPause(aj)
+                end)
+            end
 
 local function ai(ab)
     if not q then
