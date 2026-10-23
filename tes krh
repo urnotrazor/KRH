@@ -1825,10 +1825,35 @@ end)
 task.wait(1)
 u()
 
+local ah = false
+
+local function ai(ab)
+    if not q then
+        return
+    end
+
+    if ab then
+        if r then
+            r.Visible = true
+        end
+
+        if s and s:FindFirstChild("1") then
+            s["1"].Image = o
+        end
+    else
+        if r then
+            r.Visible = false
+        end
+
+        if s and s:FindFirstChild("1") then
+            s["1"].Image = ""
+        end
+    end
+end
+
 _G.vcbSetMuted = function(muted)
     ah = muted
     ai(muted)
-	print(_G.vcbSetMuted)
 end
 end)
 
