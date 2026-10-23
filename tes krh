@@ -1,3 +1,29 @@
+--[[
+	Teleport GUI  (LocalScript)
+	Put in: StarterPlayer > StarterPlayerScripts
+
+	Tabs:
+	  Teleport - type a username / display name. A player card appears with
+	            TELEPORT, SPECTATE and ESP buttons for that person.
+	  Friends - your Roblox friends who are in the same server. Each row has
+	            TP, SPECTATE and ESP buttons.
+	  Misc    - scrollable. One switch to ESP (chams) everyone in the server,
+	            a toggle for the name tags above ESP'd players, and a
+	            walk speed slider at the bottom (scroll down to find it).
+
+	Controls:
+	  - Enter in the box teleports to the matched player
+	  - Drag the title bar to move
+	  - "-" minimizes, "x" hides it
+	  - K (or RightShift) toggles show/hide
+	  - P toggles freecam (WASD, E/Q, hold right mouse to look)
+
+	ESP note:
+	  ESP state lives in plain tables (espOn / espAll), completely separate
+	  from the GUI. Closing or reopening the window never touches it, and
+	  every time the window opens the buttons are re-synced from that state.
+]]
+
 local Players          = game:GetService("Players")
 local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
