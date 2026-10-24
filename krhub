@@ -323,7 +323,7 @@ corner(tabBar, 8)
 local indicator = Instance.new("Frame")
 indicator.Name = "Indicator"
 indicator.Position = UDim2.new(0, 3, 0, 3)
-indicator.Size = UDim2.new(1 / 4, -6, 1, -6)
+indicator.Size = UDim2.new(1 / 5, -6, 1, -6)
 indicator.BackgroundColor3 = C.accent
 indicator.BorderSizePixel = 0
 indicator.Parent = tabBar
@@ -331,8 +331,8 @@ corner(indicator, 6)
 
 local function tabButton(text, index)
 	local b = Instance.new("TextButton")
-	b.Position = UDim2.fromScale((index - 1) / 4, 0)
-	b.Size = UDim2.fromScale(1 / 4, 1)
+	b.Position = UDim2.fromScale((index - 1) / 5, 0)
+	b.Size = UDim2.fromScale(1 / 5, 1)
 	b.BackgroundTransparency = 1
 	b.Text = text
 	b.Font = Enum.Font.GothamBold
@@ -348,6 +348,7 @@ local normalTab  = tabButton("Teleport", 1)
 local friendsTab = tabButton("Friends", 2)
 local allTab     = tabButton("Misc", 3)
 local toolsTab   = tabButton("Tools", 4)
+local vcTab      = tabButton("VC", 5)
 normalTab.TextColor3 = C.black -- active tab sits on the white indicator
 
 --------------------------------------------------------------------
@@ -1670,6 +1671,167 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 --------------------------------------------------------------------
+-- Page: VC (supported Voice Chat information)
+--------------------------------------------------------------------
+local vcPage = Instance.new("ScrollingFrame")
+vcPage.Name = "VCPage"
+vcPage.BackgroundTransparency = 1
+vcPage.BorderSizePixel = 0
+vcPage.Position = PAGE_POS
+vcPage.Size = PAGE_SIZE
+vcPage.Visible = false
+vcPage.ScrollBarThickness = 3
+vcPage.ScrollBarImageColor3 = C.accent
+vcPage.ScrollingDirection = Enum.ScrollingDirection.Y
+vcPage.CanvasSize = UDim2.new()
+vcPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
+vcPage.Parent = content
+
+local vcLayout = Instance.new("UIListLayout")
+vcLayout.Padding = UDim.new(0, 8)
+vcLayout.SortOrder = Enum.SortOrder.LayoutOrder
+vcLayout.Parent = vcPage
+
+local vcPad = Instance.new("UIPadding")
+vcPad.PaddingBottom = UDim.new(0, 10)
+vcPad.Parent = vcPage
+
+local vcOrder = 0
+local function nextVCOrder()
+    vcOrder += 1
+    return vcOrder
+end
+
+label(vcPage, {
+    Text = "VOICE CHAT",
+    Font = Enum.Font.GothamBold,
+    TextSize = 13,
+    TextColor3 = C.text,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Size = UDim2.new(1, -8, 0, 22),
+    LayoutOrder = nextVCOrder(),
+})
+
+label(vcPage, {
+    Text = "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.",
+    Font = Enum.Font.Gotham,
+    TextSize = 11,
+    TextColor3 = C.muted,
+    TextWrapped = true,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    TextYAlignment = Enum.TextYAlignment.Top,
+    Size = UDim2.new(1, -8, 0, 48),
+    LayoutOrder = nextVCOrder(),
+})
+
+local vcInfoBtn = makeButton(vcPage, "BYPASS VOICE CHAT", "ghost", 12)
+vcInfoBtn.Name = "VoiceChatInfoButton"
+vcInfoBtn.Size = UDim2.new(1, -8, 0, 36)
+vcInfoBtn.LayoutOrder = nextVCOrder()
+vcInfoBtn.MouseButton1Click:Connect(function()
+    local d = cloneref or function(v)
+    return v
+end
+
+local g = d(game:GetService("VoiceChatService"))
+local h = d(game:GetService("VoiceChatInternal"))
+local j = d(game:GetService("CoreGui"))
+
+local m = getconnections
+local o = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+
+local q, r, s
+
+local function u()
+    q = nil
+    r = nil
+    s = nil
+
+    for _, v in ipairs(j:GetDescendants()) do
+        if v.Name == "toggle_mic_mute" then
+            q = v
+            break
+        end
+    end
+
+    if q then
+        r = q:FindFirstChild("IntegrationIconFrame", true)
+
+        if r then
+            s = r:FindFirstChild("IntegrationIcon", true)
+        end
+    end
+end
+
+u()
+
+if not q then
+    task.spawn(function()
+        g:joinVoice()
+    end)
+
+    task.wait(1.5)
+    u()
+end
+
+local function v()
+    if s and s:FindFirstChild("1") then
+        return s["1"].Image
+    end
+
+    return nil
+end
+
+local w = false
+
+while not w do
+    local x = v()
+
+    if x and x ~= o and x ~= "" then
+        w = true
+    end
+
+    if not w then
+        task.wait(0.5)
+    end
+end
+
+task.wait(1)
+
+task.spawn(function()
+    g:leaveVoice()
+end)
+
+task.wait(2)
+
+if m then
+    task.spawn(function()
+        local y = m(h.StateChanged)
+
+        for z, aa in ipairs(y) do
+            if z >= 7 and aa then
+                aa:Disable()
+            end
+        end
+    end)
+end
+
+task.wait(2)
+
+task.spawn(function()
+    g:joinVoice()
+end)
+
+task.wait(1)
+u()
+
+_G.vcbSetMuted = function(muted)
+    ah = muted
+    ai(muted)
+end
+end)
+
+--------------------------------------------------------------------
 -- Sync every button from the real state
 --------------------------------------------------------------------
 updateUI = function()
@@ -1743,9 +1905,9 @@ refreshFriends()
 --------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4}
-local TAB_BUTTONS = {Normal = normalTab, Friends = friendsTab, All = allTab, Tools = toolsTab}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5}
+local TAB_BUTTONS = {Normal = normalTab, Friends = friendsTab, All = allTab, Tools = toolsTab, VC = vcTab}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage}
 local currentTab = "Normal"
 
 local function switchTab(name)
@@ -1755,7 +1917,7 @@ local function switchTab(name)
 	currentTab = name
 
 	tween(indicator, 0.35, {
-		Position = UDim2.new((toIdx - 1) / 4, 3, 0, 3)
+		Position = UDim2.new((toIdx - 1) / 5, 3, 0, 3)
 	}, Enum.EasingStyle.Back)
 
 	for tabName, btn in pairs(TAB_BUTTONS) do
@@ -1775,6 +1937,7 @@ normalTab.MouseButton1Click:Connect(function() switchTab("Normal") end)
 friendsTab.MouseButton1Click:Connect(function() switchTab("Friends") end)
 allTab.MouseButton1Click:Connect(function() switchTab("All") end)
 toolsTab.MouseButton1Click:Connect(function() switchTab("Tools") end)
+vcTab.MouseButton1Click:Connect(function() switchTab("VC") end)
 
 --------------------------------------------------------------------
 -- Minimize / close / toggle
