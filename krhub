@@ -1729,6 +1729,300 @@ vcInfoBtn.Name = "VoiceChatInfoButton"
 vcInfoBtn.Size = UDim2.new(1, -8, 0, 36)
 vcInfoBtn.LayoutOrder = nextVCOrder()
 vcInfoBtn.MouseButton1Click:Connect(function()
+	local cloneref = cloneref or function(instance)
+    return instance
+end
+
+local function safeGetService(name)
+    local ok, service = pcall(function()
+        return game:GetService(name)
+    end)
+    return ok and service or nil
+end
+
+local voiceChatInternal = safeGetService("VoiceChatInternal")
+local coreGui = safeGetService("CoreGui")
+local players = safeGetService("Players")
+local localPlayer = players and players.LocalPlayer
+
+local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+
+local buttonSize = 35
+local offsetX = 54
+local offsetY = 6
+
+local function isMuted()
+    if not voiceChatInternal then
+        return false
+    end
+
+    local ok, paused = pcall(function()
+        return voiceChatInternal:IsPublishPaused()
+    end)
+
+    return ok and paused == true or false
+end
+
+local function setMuted(state)
+    if not voiceChatInternal then
+        warn("VoiceChatInternal is unavailable in this environment.")
+        return
+    end
+
+    local ok, err = pcall(function()
+        voiceChatInternal:PublishPause(state)
+    end)
+
+    if not ok then
+        warn("Could not change voice-chat mute state: " .. tostring(err))
+    end
+end
+
+local function getGuiParent()
+
+    if coreGui then
+        return cloneref(coreGui)
+    end
+
+    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+    return playerGui
+end
+
+local function hideExistingVoiceIcons()
+    local parent = getGuiParent()
+    if not parent then
+        return
+    end
+
+    local voiceGui = parent:FindFirstChild("VoiceChat")
+    if not voiceGui then
+        return
+    end
+
+    for _, descendant in ipairs(voiceGui:GetDescendants()) do
+        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+            descendant.ImageTransparency = 1
+        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+            descendant.TextTransparency = 1
+        end
+    end
+end
+
+local function refresh(icon)
+    if not icon or not icon.Parent then
+        return
+    end
+
+    icon.Image = isMuted() and mutedImage or talkingImage
+end
+
+local function createGui()
+    local parent = getGuiParent()
+    if not parent then
+        warn("Could not find a GUI parent for the voice-chat button.")
+        return
+    end
+
+    local previous = parent:FindFirstChild("CustomVoiceController")
+    if previous then
+        previous:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CustomVoiceController"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 999999
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = parent
+
+    local hitArea = Instance.new("TextButton")
+    hitArea.Name = "MicHitArea"
+    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
+    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
+    hitArea.BackgroundTransparency = 1
+    hitArea.Text = ""
+    hitArea.Active = true
+    hitArea.ZIndex = 10000
+    hitArea.Parent = screenGui
+
+    local icon = Instance.new("ImageLabel")
+    icon.Name = "MicIcon"
+    icon.Size = UDim2.fromScale(1, 1)
+    icon.Position = UDim2.fromOffset(0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Image = mutedImage
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.ZIndex = 10001
+    icon.Parent = hitArea
+
+    hitArea.Activated:Connect(function()
+        setMuted(not isMuted())
+        refresh(icon)
+    end)
+
+    hideExistingVoiceIcons()
+    refresh(icon)
+
+    -- Keep the icon in sync if the state changes elsewhere.
+    task.spawn(function()
+        while screenGui.Parent do
+            refresh(icon)
+            task.wait(0.25)
+        end
+    end)
+end
+
+createGui()
+local cloneref = cloneref or function(instance)
+    return instance
+end
+
+local function safeGetService(name)
+    local ok, service = pcall(function()
+        return game:GetService(name)
+    end)
+    return ok and service or nil
+end
+
+local voiceChatInternal = safeGetService("VoiceChatInternal")
+local coreGui = safeGetService("CoreGui")
+local players = safeGetService("Players")
+local localPlayer = players and players.LocalPlayer
+
+local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+
+local buttonSize = 35
+local offsetX = 54
+local offsetY = 6
+
+local function isMuted()
+    if not voiceChatInternal then
+        return false
+    end
+
+    local ok, paused = pcall(function()
+        return voiceChatInternal:IsPublishPaused()
+    end)
+
+    return ok and paused == true or false
+end
+
+local function setMuted(state)
+    if not voiceChatInternal then
+        warn("VoiceChatInternal is unavailable in this environment.")
+        return
+    end
+
+    local ok, err = pcall(function()
+        voiceChatInternal:PublishPause(state)
+    end)
+
+    if not ok then
+        warn("Could not change voice-chat mute state: " .. tostring(err))
+    end
+end
+
+local function getGuiParent()
+
+    if coreGui then
+        return cloneref(coreGui)
+    end
+
+    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+    return playerGui
+end
+
+local function hideExistingVoiceIcons()
+    local parent = getGuiParent()
+    if not parent then
+        return
+    end
+
+    local voiceGui = parent:FindFirstChild("VoiceChat")
+    if not voiceGui then
+        return
+    end
+
+    for _, descendant in ipairs(voiceGui:GetDescendants()) do
+        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+            descendant.ImageTransparency = 1
+        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+            descendant.TextTransparency = 1
+        end
+    end
+end
+
+local function refresh(icon)
+    if not icon or not icon.Parent then
+        return
+    end
+
+    icon.Image = isMuted() and mutedImage or talkingImage
+end
+
+local function createGui()
+    local parent = getGuiParent()
+    if not parent then
+        warn("Could not find a GUI parent for the voice-chat button.")
+        return
+    end
+
+    local previous = parent:FindFirstChild("CustomVoiceController")
+    if previous then
+        previous:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CustomVoiceController"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 999999
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = parent
+
+    local hitArea = Instance.new("TextButton")
+    hitArea.Name = "MicHitArea"
+    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
+    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
+    hitArea.BackgroundTransparency = 1
+    hitArea.Text = ""
+    hitArea.Active = true
+    hitArea.ZIndex = 10000
+    hitArea.Parent = screenGui
+
+    local icon = Instance.new("ImageLabel")
+    icon.Name = "MicIcon"
+    icon.Size = UDim2.fromScale(1, 1)
+    icon.Position = UDim2.fromOffset(0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Image = mutedImage
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.ZIndex = 10001
+    icon.Parent = hitArea
+
+    hitArea.Activated:Connect(function()
+        setMuted(not isMuted())
+        refresh(icon)
+    end)
+
+    hideExistingVoiceIcons()
+    refresh(icon)
+
+    -- Keep the icon in sync if the state changes elsewhere.
+    task.spawn(function()
+        while screenGui.Parent do
+            refresh(icon)
+            task.wait(0.25)
+        end
+    end)
+end
+
+createGui()
+-- icon mute
+
     local d = cloneref or function(v)
     return v
 end
