@@ -1,122 +1,267 @@
 --[[
-	KRHUB  -  Luna Interface Suite edition   (executor script)
+	Teleport GUI  (LocalScript)
+	Put in: StarterPlayer > StarterPlayerScripts
 
-	UI: Luna Interface Suite by Nebula Softworks
-	    https://github.com/Nebula-Softworks/Luna-Interface-Suite
+	Dark card theme (plain ScreenGui, no library).
 
-	Tabs:
-	  Teleport - type a username / display name. Teleport, Spectate and ESP
-	             controls act on the matched player.
-	  Friends  - pick one of your Roblox friends in this server from the
-	             dropdown, then Teleport / Spectate / ESP them.
-	  Misc     - ESP everyone, name tags, freecam, anti-AFK, walk speed.
+	Tabs (top left):
+	  Teleport - type a username / display name. A player card pops out with
+	             TELEPORT, SPECTATE and ESP buttons for that person.
+	  Friends  - your Roblox friends in the same server. Each row has
+	             TP, SPECTATE and ESP buttons.
+	  Misc     - ESP everyone, name tags, freecam, Anti-AFK and a walk speed
+	             slider.
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
 
 	Controls:
-	  - P toggles freecam (WASD, E/Q, hold right mouse to look, Shift = faster,
-	    scroll = speed)
-	  - Luna's own window buttons minimize / close the window
+	  - Enter in the box teleports to the matched player
+	  - Drag the title bar to move
+	  - "-" minimizes, "x" hides it
+	  - K toggles show/hide
+	  - P toggles freecam (WASD, E/Q, hold right mouse to look)
 
-	NOTE: Luna is loaded with loadstring(game:HttpGet(...)), so this must be
-	run from an executor, not as a LocalScript in StarterPlayerScripts.
-
-	ESP state lives in plain tables (espOn / espAll), completely separate
-	from the UI, so closing the window never touches it.
+	ESP note:
+	  ESP state lives in plain tables (espOn / espAll), completely separate
+	  from the GUI. Closing or reopening the window never touches it, and
+	  every time the window opens the buttons are re-synced from that state.
 ]]
 
 local Players          = game:GetService("Players")
+local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
-local VirtualUser      = game:GetService("VirtualUser")
 
-local player = Players.LocalPlayer
+local player    = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
 
 print("script ran")
 
 --------------------------------------------------------------------
--- Load Luna (and clean up a previous run)
---------------------------------------------------------------------
-local env   = (getgenv and getgenv()) or _G
-local token = {}
-
-if env.KRHUB_LUNA then
-	pcall(function() env.KRHUB_LUNA:Destroy() end)
-end
-env.KRHUB_TOKEN = token -- old background loops stop when this changes
-
-local LUNA_URL = "https://raw.githubusercontent.com/Nebula-Softworks/Luna-Interface-Suite/main/source.lua"
-
-local okLuna, Luna = pcall(function()
-	return loadstring(game:HttpGet(LUNA_URL, true))()
-end)
-if not okLuna or not Luna then
-	warn("[KRHUB] Could not load Luna Interface Suite: " .. tostring(Luna))
-	return
-end
-env.KRHUB_LUNA = Luna
-
-local function alive()
-	return env.KRHUB_TOKEN == token
-end
-
---------------------------------------------------------------------
--- Colors used by the game-world visuals (ESP) + status "colors"
+-- Theme (dark cards, gold accent)
 --------------------------------------------------------------------
 local C = {
-	black  = Color3.fromRGB(0, 0, 0),
-	accent = Color3.fromRGB(255, 255, 255),
-	ok     = "ok",
-	err    = "err",
-	muted  = "muted",
+	black      = Color3.fromRGB(0, 0, 0),
+	bg         = Color3.fromRGB(18, 18, 18),
+	bar        = Color3.fromRGB(13, 13, 13),
+	card       = Color3.fromRGB(27, 27, 27),
+	cardStroke = Color3.fromRGB(42, 42, 42),
+	field      = Color3.fromRGB(22, 22, 22),
+	segSel     = Color3.fromRGB(46, 46, 46),
+	accent     = Color3.fromRGB(255, 255, 255), -- ESP highlight color
+	text       = Color3.fromRGB(235, 235, 235),
+	muted      = Color3.fromRGB(135, 135, 135),
+	faint      = Color3.fromRGB(70, 70, 70),
+	gold       = Color3.fromRGB(226, 168, 34),
+	goldBg     = Color3.fromRGB(58, 47, 14),
+	red        = Color3.fromRGB(200, 68, 60),
+	ok         = Color3.fromRGB(255, 255, 255),
+	err        = Color3.fromRGB(235, 120, 110),
 }
 
---------------------------------------------------------------------
--- Window + notifications (replaces the old status line)
---------------------------------------------------------------------
-local Window = Luna:CreateWindow({
-	Name = "KRHUB",
-	Subtitle = "teleport / esp / tools",
-	LogoID = nil,
-	LoadingEnabled = false,
-	LoadingTitle = "KRHUB",
-	LoadingSubtitle = "Luna Interface Suite",
-	ConfigSettings = {
-		RootFolder = nil,
-		ConfigFolder = "KRHUB",
-	},
-	KeySystem = false,
-})
-
-local lastNote, lastNoteAt = "", 0
-local function setStatus(text, kind)
-	local now = os.clock()
-	if text == lastNote and now - lastNoteAt < 1 then return end
-	lastNote, lastNoteAt = text, now
-	pcall(function()
-		Luna:Notification({
-			Title = "KRHUB",
-			Icon = (kind == "err") and "error" or "info",
-			ImageSource = "Material",
-			Content = text,
-		})
-	end)
-end
+local FULL_SIZE = UDim2.fromOffset(660, 420)
+local MINI_SIZE = UDim2.fromOffset(660, 40)
 
 --------------------------------------------------------------------
 -- Helpers
 --------------------------------------------------------------------
+local function tween(obj, t, props, style, dir)
+	local tw = TweenService:Create(
+		obj,
+		TweenInfo.new(t, style or Enum.EasingStyle.Quint, dir or Enum.EasingDirection.Out),
+		props
+	)
+	tw:Play()
+	return tw
+end
+
+local function corner(parent, r)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, r)
+	c.Parent = parent
+	return c
+end
+
+local function stroke(parent, color, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Color = color
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = parent
+	return s
+end
+
+local function label(parent, props)
+	local l = Instance.new("TextLabel")
+	l.BackgroundTransparency = 1
+	l.Font = Enum.Font.GothamMedium
+	l.TextColor3 = C.text
+	l.TextSize = 14
+	for k, v in pairs(props) do l[k] = v end
+	l.Parent = parent
+	return l
+end
+
+-- Next LayoutOrder inside a container (keeps list order = creation order)
+local function nextOrder(container)
+	local n = (container:GetAttribute("n") or 0) + 1
+	container:SetAttribute("n", n)
+	return n
+end
+
+-- Hover / press feedback by color only (no scaling, so nothing gets
+-- clipped by scrolling frames). The button's resting color lives in the
+-- "base" attribute, so toggle styles can change it and hover still works.
+local function makeInteractive(btn)
+	local function target()
+		local base = btn:GetAttribute("base") or btn.BackgroundColor3
+		if btn:GetAttribute("down") then
+			return base:Lerp(C.black, 0.3)
+		elseif btn:GetAttribute("hover") then
+			return base:Lerp(C.accent, 0.09)
+		end
+		return base
+	end
+	local function refresh()
+		tween(btn, 0.12, {BackgroundColor3 = target()})
+	end
+	btn.MouseEnter:Connect(function()
+		btn:SetAttribute("hover", true)
+		refresh()
+	end)
+	btn.MouseLeave:Connect(function()
+		btn:SetAttribute("hover", false)
+		btn:SetAttribute("down", false)
+		refresh()
+	end)
+	btn.MouseButton1Down:Connect(function()
+		btn:SetAttribute("down", true)
+		refresh()
+	end)
+	btn.MouseButton1Up:Connect(function()
+		btn:SetAttribute("down", false)
+		refresh()
+	end)
+	btn:GetAttributeChangedSignal("base"):Connect(refresh)
+end
+
+-- Generic button. style = "primary" (gold) or "ghost" (dark, outlined)
+local function makeButton(parent, text, style, textSize)
+	local b = Instance.new("TextButton")
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = textSize or 12
+	b.AutoButtonColor = false
+	b.BorderSizePixel = 0
+	if style == "primary" then
+		b.BackgroundColor3 = C.gold
+		b.TextColor3 = C.black
+	else
+		b.BackgroundColor3 = C.field
+		b.TextColor3 = C.text
+	end
+	b.Parent = parent
+	corner(b, 7)
+	local s = stroke(b, style == "primary" and C.gold or C.cardStroke, 1, 0)
+	s.Name = "Stroke"
+	b:SetAttribute("base", b.BackgroundColor3)
+	makeInteractive(b)
+	return b
+end
+
+-- Toggle look for ghost buttons (gold when active)
+local function setToggleStyle(btn, active, activeText, idleText)
+	if not btn then return end
+	btn.Text = active and activeText or idleText
+	btn:SetAttribute("base", active and C.goldBg or C.field)
+	tween(btn, 0.2, {TextColor3 = active and C.gold or C.text})
+	local s = btn:FindFirstChild("Stroke")
+	if s then tween(s, 0.2, {Color = active and C.gold or C.cardStroke}) end
+end
+
 local function trim(s)
 	return (tostring(s or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
-local updateUI -- re-syncs every Luna element from the real state (set at the bottom)
+-- Segmented control with a sliding highlight (used for the OFF / ON switches)
+local function makeSegmented(parent, options, size, selColors)
+	local n = #options
+	local api = {}
+	local current = 1
+
+	local frame = Instance.new("Frame")
+	frame.Size = size
+	frame.BackgroundColor3 = C.field
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	corner(frame, 7)
+	stroke(frame, C.cardStroke, 1, 0)
+
+	local inner = Instance.new("Frame")
+	inner.BackgroundTransparency = 1
+	inner.Position = UDim2.fromOffset(2, 2)
+	inner.Size = UDim2.new(1, -4, 1, -4)
+	inner.Parent = frame
+
+	local hl = Instance.new("Frame")
+	hl.Size = UDim2.new(1 / n, 0, 1, 0)
+	hl.BackgroundColor3 = C.segSel
+	hl.BorderSizePixel = 0
+	hl.Parent = inner
+	corner(hl, 5)
+
+	local buttons = {}
+
+	local function set(idx, instant)
+		current = idx
+		local pos = UDim2.new((idx - 1) / n, 0, 0, 0)
+		if instant then
+			hl.Position = pos
+		else
+			tween(hl, 0.22, {Position = pos}, Enum.EasingStyle.Quint)
+		end
+		for i, b in ipairs(buttons) do
+			local col = (i == idx) and (selColors[i] or C.text) or C.muted
+			if instant then
+				b.TextColor3 = col
+			else
+				tween(b, 0.2, {TextColor3 = col})
+			end
+		end
+	end
+
+	for i, text in ipairs(options) do
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(1 / n, 0, 1, 0)
+		b.Position = UDim2.new((i - 1) / n, 0, 0, 0)
+		b.BackgroundTransparency = 1
+		b.Text = text
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 12
+		b.TextColor3 = C.muted
+		b.AutoButtonColor = false
+		b.ZIndex = 2
+		b.Parent = inner
+		buttons[i] = b
+		b.MouseButton1Click:Connect(function()
+			if current == i then return end
+			set(i)
+			if api.onSelect then api.onSelect(i) end
+		end)
+	end
+
+	api.frame = frame
+	api.set = set
+	set(1, true)
+	return api
+end
 
 --------------------------------------------------------------------
 -- Friend detection
 --------------------------------------------------------------------
 local friendCache = {}   -- [UserId] = true/false
-local scheduleFriendRefresh -- defined with the Friends tab
+local refreshFriends     -- defined further down (needs the GUI)
 
 local function checkFriend(p)
 	if p == player then return end
@@ -125,10 +270,9 @@ local function checkFriend(p)
 			return player:IsFriendsWith(p.UserId)
 		end)
 		friendCache[p.UserId] = (ok and res) or false
-		if scheduleFriendRefresh then scheduleFriendRefresh() end
+		if refreshFriends then refreshFriends() end
 	end)
 end
-
 --------------------------------------------------------------------
 -- Player lookup (exact -> prefix -> contains, on Name and DisplayName)
 --------------------------------------------------------------------
@@ -151,9 +295,213 @@ local function findPlayer(query)
 	end
 	return prefix or contains
 end
+--------------------------------------------------------------------
+-- GUI shell
+--------------------------------------------------------------------
+local old = playerGui:FindFirstChild("TeleportGui")
+if old then old:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "TeleportGui"
+gui.ResetOnSpawn = false
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Parent = playerGui
+
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.Position = UDim2.fromScale(0.5, 0.5)
+main.Size = FULL_SIZE
+main.BackgroundColor3 = C.bg
+main.BorderSizePixel = 0
+main.ClipsDescendants = true
+main.Parent = gui
+corner(main, 10)
+stroke(main, C.cardStroke, 1, 0)
+
+local mainScale = Instance.new("UIScale")
+mainScale.Scale = 0
+mainScale.Parent = main
+
+-- Title bar ---------------------------------------------------------
+local titleBar = Instance.new("Frame")
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = C.bar
+titleBar.BorderSizePixel = 0
+titleBar.Parent = main
+corner(titleBar, 10)
+
+local titlePatch = Instance.new("Frame")
+titlePatch.Size = UDim2.new(1, 0, 0, 12)
+titlePatch.Position = UDim2.new(0, 0, 1, -12)
+titlePatch.BackgroundColor3 = C.bar
+titlePatch.BorderSizePixel = 0
+titlePatch.Parent = titleBar
+
+label(titleBar, {
+	Text = "KRHUB",
+	Font = Enum.Font.GothamBold,
+	TextSize = 14,
+	Size = UDim2.fromScale(1, 1),
+})
+
+local function titleButton(text, xOffset)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(28, 26)
+	b.Position = UDim2.new(1, xOffset, 0.5, -13)
+	b.BackgroundColor3 = C.bar
+	b.BackgroundTransparency = 1
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 16
+	b.TextColor3 = C.muted
+	b.AutoButtonColor = false
+	b.BorderSizePixel = 0
+	b.Parent = titleBar
+	corner(b, 7)
+	b.MouseEnter:Connect(function()
+		tween(b, 0.12, {BackgroundTransparency = 0, BackgroundColor3 = C.segSel, TextColor3 = C.text})
+	end)
+	b.MouseLeave:Connect(function()
+		tween(b, 0.12, {BackgroundTransparency = 1, TextColor3 = C.muted})
+	end)
+	return b
+end
+
+local minBtn   = titleButton("–", -70)
+local closeBtn = titleButton("×", -38)
+
+-- Tab buttons (left side of the title bar)
+local TAB_DEFS = {
+	{key = "Normal",  text = "Teleport", width = 66},
+	{key = "Friends", text = "Friends",  width = 58},
+	{key = "All",     text = "Misc",     width = 46},
+	{key = "Tools",   text = "Tools",    width = 50},
+	{key = "VC",      text = "VC",       width = 38},
+}
+local TAB_BUTTONS = {}
+local currentTab = "Normal"
+
+do
+	local x = 10
+	for _, def in ipairs(TAB_DEFS) do
+		local b = Instance.new("TextButton")
+		b.Name = def.key .. "Tab"
+		b.Size = UDim2.fromOffset(def.width, 28)
+		b.Position = UDim2.new(0, x, 0.5, -14)
+		b.BackgroundColor3 = C.goldBg
+		b.BackgroundTransparency = 1
+		b.Text = def.text
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 12
+		b.TextColor3 = C.muted
+		b.AutoButtonColor = false
+		b.BorderSizePixel = 0
+		b.ZIndex = 2
+		b.Parent = titleBar
+		corner(b, 7)
+		b.MouseEnter:Connect(function()
+			if currentTab ~= def.key then tween(b, 0.12, {TextColor3 = C.text}) end
+		end)
+		b.MouseLeave:Connect(function()
+			if currentTab ~= def.key then tween(b, 0.12, {TextColor3 = C.muted}) end
+		end)
+		TAB_BUTTONS[def.key] = b
+		x += def.width + 4
+	end
+end
+
+-- Banner under the title bar: player count | status | active features
+local banner = Instance.new("Frame")
+banner.Name = "Banner"
+banner.Position = UDim2.fromOffset(0, 40)
+banner.Size = UDim2.new(1, 0, 0, 28)
+banner.BackgroundColor3 = C.goldBg
+banner.BorderSizePixel = 0
+banner.Parent = main
+
+local bannerLine = Instance.new("Frame")
+bannerLine.Position = UDim2.new(0, 0, 1, -1)
+bannerLine.Size = UDim2.new(1, 0, 0, 1)
+bannerLine.BackgroundColor3 = Color3.fromRGB(96, 76, 22)
+bannerLine.BorderSizePixel = 0
+bannerLine.Parent = banner
+
+local playerCount = label(banner, {
+	Text = "Players: 0",
+	Font = Enum.Font.GothamBold,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Position = UDim2.fromOffset(14, 0),
+	Size = UDim2.new(0, 110, 1, 0),
+})
+
+local statusLabel = label(banner, {
+	Text = "Ready",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = Color3.fromRGB(205, 190, 150),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(124, 0),
+	Size = UDim2.new(1, -124 - 230, 1, 0),
+})
+
+local bannerSummary = label(banner, {
+	Text = "",
+	Font = Enum.Font.Gotham,
+	TextSize = 11,
+	TextColor3 = Color3.fromRGB(205, 190, 150),
+	TextXAlignment = Enum.TextXAlignment.Right,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	AnchorPoint = Vector2.new(1, 0),
+	Position = UDim2.new(1, -14, 0, 0),
+	Size = UDim2.fromOffset(210, 28),
+})
+
+local function setStatus(text, color)
+	if color == nil or color == C.muted then
+		color = Color3.fromRGB(205, 190, 150)
+	end
+	statusLabel.Text = text
+	statusLabel.TextColor3 = color
+	statusLabel.TextTransparency = 1
+	tween(statusLabel, 0.25, {TextTransparency = 0})
+end
+
+-- Content (everything under the banner)
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
+content.Position = UDim2.fromOffset(0, 68)
+content.Size = UDim2.new(1, 0, 1, -68)
+content.Parent = main
+
+local function updatePlayerCount()
+	playerCount.Text = ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers)
+end
+updatePlayerCount()
+Players.PlayerAdded:Connect(updatePlayerCount)
+Players.PlayerRemoving:Connect(function()
+	task.defer(updatePlayerCount) -- the leaving player is still listed until after this event
+end)
 
 --------------------------------------------------------------------
--- ESP (chams) - state is independent from the UI
+-- Shared UI references (filled in once the pages are built)
+--------------------------------------------------------------------
+local updateUI                 -- re-syncs every button from the real state
+local switches = {}            -- [key] = OFF/ON segmented control
+local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
+local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
+local cardSpecBtn, cardEspBtn  -- buttons on the player card
+local allInfo                  -- "ESP active on N players" label on Misc
+local stopFreecam              -- defined in the freecam section (spectate needs to call it)
+local currentMatch             -- player currently shown on the card
+local inputBox                 -- username box on the Teleport tab
+
+--------------------------------------------------------------------
+-- ESP (chams) - state is independent from the GUI
 --------------------------------------------------------------------
 local espOn      = {}     -- [UserId] = true  (individually enabled)
 local espAll     = false  -- ESP for everyone
@@ -165,6 +513,7 @@ local function wantsEsp(p)
 	return espAll or espOn[p.UserId] == true
 end
 
+-- Makes the world match the state for one player (create / keep / remove)
 local function applyHighlight(p)
 	if p == player then return end
 
@@ -191,6 +540,7 @@ local function applyHighlight(p)
 	end
 end
 
+-- Name tag above the head (only while ESP is on AND names are enabled)
 local function applyNameTag(p)
 	if p == player then return end
 
@@ -232,6 +582,7 @@ local function applyNameTag(p)
 	end
 end
 
+-- Makes the world match the state for one player (highlight + name tag)
 local function applyEsp(p)
 	applyHighlight(p)
 	applyNameTag(p)
@@ -292,6 +643,7 @@ local function clearAllEsp()
 	setStatus("All ESP cleared", C.muted)
 end
 
+-- Keep ESP alive through respawns, joins and leaves
 local function setupEspPlayer(p)
 	if p == player then return end
 	p.CharacterAdded:Connect(function()
@@ -320,16 +672,16 @@ for _, p in ipairs(Players:GetPlayers()) do setupEspPlayer(p) end
 
 -- Safety net: re-applies ESP once a second in case the game removed a highlight
 task.spawn(function()
-	while alive() do
+	while gui.Parent do
 		task.wait(1)
 		applyEspToAll()
 	end
 end)
-
 --------------------------------------------------------------------
 -- Teleport logic
 --------------------------------------------------------------------
 local busy = false
+local tpBtn -- the TELEPORT button on the player card (assigned below)
 
 local function teleportTo(target)
 	if busy then return end
@@ -357,21 +709,22 @@ local function teleportTo(target)
 		return
 	end
 
+	if tpBtn then tpBtn.Text = "TELEPORTING..." end
+
 	-- Land just behind the target
 	myChar:PivotTo(theirRoot.CFrame * CFrame.new(0, 0, 3))
 
 	setStatus("Teleported to " .. target.DisplayName, C.ok)
 	task.delay(0.6, function()
+		if tpBtn then tpBtn.Text = "TELEPORT" end
 		busy = false
 	end)
 end
-
 --------------------------------------------------------------------
 -- Spectate logic
 --------------------------------------------------------------------
 local spectating            -- the Player being watched, or nil
 local specConns = {}
-local stopFreecam           -- defined in the freecam section
 
 local function stopSpectating(silent)
 	for _, c in ipairs(specConns) do c:Disconnect() end
@@ -425,9 +778,22 @@ local function startSpectating(target)
 	setStatus("Spectating " .. target.DisplayName, C.ok)
 end
 
+local function toggleSpectate(target)
+	if not target then
+		setStatus("Player not found", C.err)
+		return
+	end
+	if spectating == target then
+		stopSpectating()
+	else
+		startSpectating(target)
+	end
+end
 --------------------------------------------------------------------
 -- Anti-AFK
 --------------------------------------------------------------------
+local VirtualUser = game:GetService("VirtualUser")
+
 local antiAfkOn     = false
 local antiAfkConn   = nil
 local antiAfkStored = {}   -- other Idled connections we paused: {conn = ..., enabled = true}
@@ -530,7 +896,6 @@ local function setAntiAfk(state)
 	end
 	if updateUI then updateUI() end
 end
-
 --------------------------------------------------------------------
 -- Freecam
 --------------------------------------------------------------------
@@ -635,7 +1000,6 @@ end
 local function toggleFreecam()
 	if freecamOn then stopFreecam() else startFreecam() end
 end
-
 -- Mouse wheel changes the freecam speed
 UserInputService.InputChanged:Connect(function(input, processed)
 	if freecamOn and not processed and input.UserInputType == Enum.UserInputType.MouseWheel then
@@ -645,13 +1009,24 @@ UserInputService.InputChanged:Connect(function(input, processed)
 	end
 end)
 
-UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then return end
-	if input.KeyCode == Enum.KeyCode.P then
-		toggleFreecam()
-	end
-end)
+-- Anti-AFK section ---------------------------------------------------
+label(allPage, {
+	Text = "Anti-AFK",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Size = UDim2.new(1, -8, 0, 16),
+	LayoutOrder = nextOrder(),
+})
 
+antiAfkBtn = makeButton(allPage, "ANTI-AFK: OFF", "ghost", 13)
+antiAfkBtn.Name = "AntiAfkButton"
+antiAfkBtn.Size = UDim2.new(1, -8, 0, 36)
+antiAfkBtn.LayoutOrder = nextOrder()
+antiAfkBtn.MouseButton1Click:Connect(function() setAntiAfk(not antiAfkOn) end)
+
+setAntiAfk(true) -- on by default, like the old version
 --------------------------------------------------------------------
 -- Walk speed
 --------------------------------------------------------------------
@@ -677,7 +1052,6 @@ local function hookCharacter(char)
 end
 player.CharacterAdded:Connect(hookCharacter)
 if player.Character then task.spawn(hookCharacter, player.Character) end
-
 local function setSpeed(value)
 	value = math.clamp(math.round(value), SPEED_MIN, SPEED_MAX)
 	customSpeed = value
@@ -717,7 +1091,6 @@ local function setNoclip(state)
 	if updateUI then updateUI() end
 	setStatus(state and "Noclip on" or "Noclip off", state and C.ok or C.muted)
 end
-
 --------------------------------------------------------------------
 -- Fly
 --------------------------------------------------------------------
@@ -801,11 +1174,14 @@ local function startFly()
 	setStatus("Fly on", C.ok)
 end
 
+local function toggleFly()
+	if flyOn then stopFly() else startFly() end
+end
+
 -- Flying stops when you respawn (the old body movers are gone with the character)
 player.CharacterAdded:Connect(function()
 	if flyOn then stopFly(true) end
 end)
-
 --------------------------------------------------------------------
 -- Click teleport
 --------------------------------------------------------------------
@@ -819,12 +1195,11 @@ local function setClickTp(state)
 		state and C.ok or C.muted
 	)
 end
-
 local clickRayParams = RaycastParams.new()
 clickRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not clickTpOn then return end -- clicks on the UI are ignored
+	if processed or not clickTpOn then return end -- clicks on the GUI are ignored
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
 	local cam  = workspace.CurrentCamera
@@ -844,7 +1219,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 		setStatus("Nothing to teleport to there", C.err)
 	end
 end)
-
 --------------------------------------------------------------------
 -- Voice chat (your original code, unchanged)
 --------------------------------------------------------------------
@@ -1246,378 +1620,892 @@ end
 end
 
 --------------------------------------------------------------------
--- Luna UI
+-- Card building blocks
 --------------------------------------------------------------------
-local currentMatch    -- player matched by the Teleport tab's input
-local selectedFriend  -- player picked in the Friends tab dropdown
+local function makeColumn(page, side)
+	local col = Instance.new("ScrollingFrame")
+	col.Name = side .. "Column"
+	col.BackgroundTransparency = 1
+	col.BorderSizePixel = 0
+	col.ScrollBarThickness = 3
+	col.ScrollBarImageColor3 = C.faint
+	col.ScrollingDirection = Enum.ScrollingDirection.Y
+	col.CanvasSize = UDim2.new()
+	col.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	col.Size = UDim2.new(0.5, -7, 1, 0)
+	col.Position = (side == "left") and UDim2.new(0, 0, 0, 0) or UDim2.new(0.5, 7, 0, 0)
+	col.Parent = page
 
-local toggles       = {}  -- [key] = Luna toggle element
-local uiValue       = {}  -- [key] = the value the Luna element is known to show
-local labels        = {}  -- [key] = Luna label element
-local labelText     = {}  -- [key] = last text set on that label
-local targetSyncers = {}  -- functions that re-sync the per-target toggles
-
-local function makeToggle(tab, key, name, description, initial, onChange)
-	uiValue[key] = initial
-	toggles[key] = tab:CreateToggle({
-		Name = name,
-		Description = description,
-		CurrentValue = initial,
-		Callback = function(value)
-			uiValue[key] = value
-			onChange(value)
-		end,
-	}, key)
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 10)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = col
+	return col
 end
 
--- Pushes a state change into the Luna toggle (only if it differs)
-local function syncToggle(key, value)
-	local el = toggles[key]
-	if el and uiValue[key] ~= value then
-		uiValue[key] = value
-		pcall(function() el:Set({CurrentValue = value}) end)
-	end
+-- Card with an (i) icon + title. Returns the card and its header row.
+local function makeCard(parent, title)
+	local card = Instance.new("Frame")
+	card.Name = "Card"
+	card.Size = UDim2.new(1, -8, 0, 0)
+	card.AutomaticSize = Enum.AutomaticSize.Y
+	card.BackgroundColor3 = C.card
+	card.BorderSizePixel = 0
+	card.LayoutOrder = nextOrder(parent)
+	card.Parent = parent
+	corner(card, 9)
+	stroke(card, C.cardStroke, 1, 0)
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 12)
+	pad.PaddingBottom = UDim.new(0, 12)
+	pad.PaddingLeft = UDim.new(0, 12)
+	pad.PaddingRight = UDim.new(0, 12)
+	pad.Parent = card
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = card
+
+	local head = Instance.new("Frame")
+	head.Name = "Head"
+	head.BackgroundTransparency = 1
+	head.Size = UDim2.new(1, 0, 0, 26)
+	head.LayoutOrder = 0
+	head.Parent = card
+
+	local icon = Instance.new("Frame")
+	icon.BackgroundTransparency = 1
+	icon.Position = UDim2.new(0, 0, 0.5, -8)
+	icon.Size = UDim2.fromOffset(16, 16)
+	icon.Parent = head
+	corner(icon, 8)
+	stroke(icon, C.muted, 1, 0)
+	label(icon, {
+		Text = "i",
+		Font = Enum.Font.GothamBold,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		Size = UDim2.fromScale(1, 1),
+	})
+
+	label(head, {
+		Text = title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(26, 0),
+		Size = UDim2.new(1, -26, 1, 0),
+	})
+
+	return card, head
 end
 
-local function setLabel(key, text)
-	local el = labels[key]
-	if el and labelText[key] ~= text then
-		labelText[key] = text
-		pcall(function() el:Set({Text = text}) end)
-	end
-end
-
-local function createTab(name, icon)
-	local ok, tab = pcall(function()
-		return Window:CreateTab({
-			Name = name,
-			Icon = icon,
-			ImageSource = "Material",
-			ShowTitle = true,
-		})
-	end)
-	if ok and tab then return tab end
-	return Window:CreateTab({
-		Name = name,
-		Icon = "view_in_ar",
-		ImageSource = "Material",
-		ShowTitle = true,
+-- Small muted wrapped text inside a card
+local function addHint(card, text)
+	return label(card, {
+		Text = text,
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = nextOrder(card),
 	})
 end
 
--- Teleport / Spectate / ESP controls for whichever player getTarget() returns
-local function makeTargetControls(tab, prefix, getTarget)
-	tab:CreateButton({
-		Name = "Teleport",
-		Description = "Teleport to the player",
-		Callback = function()
-			local t = getTarget()
-			if t then teleportTo(t) else setStatus("Player not found", C.err) end
-		end,
-	})
-
-	makeToggle(tab, prefix .. "Spec", "Spectate", "Watch the player through their camera", false, function(on)
-		local t = getTarget()
-		if on then
-			if t then
-				if spectating ~= t then startSpectating(t) end
-			else
-				setStatus("Player not found", C.err)
-			end
-		elseif spectating then
-			stopSpectating()
-		end
-		updateUI()
-	end)
-
-	makeToggle(tab, prefix .. "Esp", "ESP", "Highlight the player through walls", false, function(on)
-		local t = getTarget()
-		if not t then
-			setStatus("Player not found", C.err)
-		elseif wantsEsp(t) ~= on then
-			toggleEsp(t)
-		end
-		updateUI()
-	end)
-
-	table.insert(targetSyncers, function()
-		local t = getTarget()
-		syncToggle(prefix .. "Spec", t ~= nil and spectating == t)
-		syncToggle(prefix .. "Esp", t ~= nil and t.Parent ~= nil and wantsEsp(t))
-	end)
+-- OFF / ON switch on the right side of a card header
+local function addSwitch(head, key, onChange)
+	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.gold})
+	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
+	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+	seg.onSelect = function(idx)
+		onChange(idx == 2)
+		if updateUI then updateUI() end
+	end
+	switches[key] = seg
+	return seg
 end
 
-local function buildUI()
-	----------------------------------------------------------------
-	-- Teleport tab
-	----------------------------------------------------------------
-	local tpTab = createTab("Teleport", "my_location")
+-- Slider (gold fill). Returns an api with set(v) (visual only).
+local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onChange, onDone)
+	local api = {}
 
-	labels.players = tpTab:CreateLabel({Text = "Players: 0", Style = 1})
-	labels.match   = tpTab:CreateLabel({Text = "Type a name to teleport, spectate or ESP", Style = 1})
+	local hit = Instance.new("TextButton")
+	hit.Text = ""
+	hit.AutoButtonColor = false
+	hit.BackgroundTransparency = 1
+	hit.Size = UDim2.new(1, 0, 0, 26)
+	hit.LayoutOrder = nextOrder(parent)
+	hit.Parent = parent
 
-	tpTab:CreateInput({
-		Name = "Username or display name",
-		Description = nil,
-		PlaceholderText = "e.g. Roblox",
-		CurrentValue = "",
-		Numeric = false,
-		MaxCharacters = nil,
-		Enter = false,
-		Callback = function(text)
-			if trim(text) == "" then
-				currentMatch = nil
-				setLabel("match", "Type a name to teleport, spectate or ESP")
-			else
-				local match = findPlayer(text)
-				currentMatch = match
-				if match then
-					setLabel("match", ("Match: %s (@%s)%s"):format(
-						match.DisplayName, match.Name,
-						friendCache[match.UserId] and "  -  friend" or ""
-					))
-				else
-					setLabel("match", "No matching player")
-				end
-			end
-			updateUI()
-		end,
-	}, "usernameInput")
+	local track = Instance.new("Frame")
+	track.Position = UDim2.new(0, 0, 0.5, -3)
+	track.Size = UDim2.new(1, 0, 0, 6)
+	track.BackgroundColor3 = C.field
+	track.BorderSizePixel = 0
+	track.Parent = hit
+	corner(track, 3)
+	stroke(track, C.cardStroke, 1, 0)
 
-	tpTab:CreateDivider()
-	makeTargetControls(tpTab, "tp", function() return currentMatch end)
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = C.gold
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	corner(fill, 3)
 
-	----------------------------------------------------------------
-	-- Friends tab
-	----------------------------------------------------------------
-	local frTab = createTab("Friends", "group")
+	local knob = Instance.new("Frame")
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Size = UDim2.fromOffset(14, 14)
+	knob.Position = UDim2.fromScale(0, 0.5)
+	knob.BackgroundColor3 = C.text
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 2
+	knob.Parent = track
+	corner(knob, 7)
 
-	labels.friends = frTab:CreateLabel({Text = "Friends in this server (0)", Style = 1})
+	local function visual(v)
+		local alpha = (v - minV) / (maxV - minV)
+		fill.Size = UDim2.fromScale(alpha, 1)
+		knob.Position = UDim2.fromScale(alpha, 0.5)
+		if valueLabel then valueLabel.Text = tostring(v) end
+	end
+	visual(startV)
+	api.set = visual
 
-	local friendByLabel = {}
-	local friendDropdown = frTab:CreateDropdown({
-		Name = "Friend",
-		Description = "Friends who are in this server",
-		Options = {"No friends in server"},
-		CurrentOption = {"No friends in server"},
-		MultipleOptions = false,
-		SpecialType = nil,
-		Callback = function(opt)
-			local choice = type(opt) == "table" and opt[1] or opt
-			selectedFriend = friendByLabel[choice]
-			updateUI()
-		end,
-	}, "friendDropdown")
-
-	frTab:CreateDivider()
-	makeTargetControls(frTab, "fr", function() return selectedFriend end)
-
-	local refreshQueued = false
-	local function refreshFriends()
-		local opts = {}
-		table.clear(friendByLabel)
-
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= player and p.Parent and friendCache[p.UserId] then
-				local text = ("%s (@%s)"):format(p.DisplayName, p.Name)
-				table.insert(opts, text)
-				friendByLabel[text] = p
-			end
-		end
-
-		if selectedFriend and not (selectedFriend.Parent and friendCache[selectedFriend.UserId]) then
-			selectedFriend = nil
-		end
-
-		local count = #opts
-		if count == 0 then opts = {"No friends in server"} end
-
-		setLabel("friends", ("Friends in this server (%d)"):format(count))
-		pcall(function() friendDropdown:Set({Options = opts}) end)
-		updateUI()
+	local dragging = false
+	local function fromInput(input)
+		local alpha = math.clamp(
+			(input.Position.X - hit.AbsolutePosition.X) / hit.AbsoluteSize.X, 0, 1
+		)
+		local v = math.clamp(math.round(minV + alpha * (maxV - minV)), minV, maxV)
+		visual(v)
+		onChange(v)
 	end
 
-	-- Coalesces bursts (every checkFriend result asks for a refresh)
-	scheduleFriendRefresh = function()
-		if refreshQueued then return end
-		refreshQueued = true
-		task.delay(0.3, function()
-			refreshQueued = false
-			refreshFriends()
+	hit.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			scroller.ScrollingEnabled = false -- don't scroll the page while sliding
+			fromInput(input)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			fromInput(input)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			dragging = false
+			scroller.ScrollingEnabled = true
+			if onDone then onDone() end
+		end
+	end)
+
+	return api
+end
+
+--------------------------------------------------------------------
+-- Pages
+--------------------------------------------------------------------
+local PAGE_POS  = UDim2.fromOffset(14, 12)
+local PAGE_SIZE = UDim2.new(1, -28, 1, -24)
+
+local function newPage(visible)
+	local p = Instance.new("Frame")
+	p.BackgroundTransparency = 1
+	p.Position = PAGE_POS
+	p.Size = PAGE_SIZE
+	p.Visible = visible and true or false
+	p.Parent = content
+	return p
+end
+
+local normalPage  = newPage(true)
+local friendsPage = newPage(false)
+local allPage     = newPage(false)
+local toolsPage   = newPage(false)
+local vcPage      = newPage(false)
+
+-- Page: Teleport (input + player card) -------------------------------
+do
+	local left  = makeColumn(normalPage, "left")
+	local right = makeColumn(normalPage, "right")
+
+	local pcard = makeCard(left, "Player")
+
+	label(pcard, {
+		Text = "Username or display name",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 16),
+		LayoutOrder = nextOrder(pcard),
+	})
+
+	inputBox = Instance.new("TextBox")
+	inputBox.Name = "UsernameInput"
+	inputBox.Size = UDim2.new(1, 0, 0, 38)
+	inputBox.BackgroundColor3 = C.field
+	inputBox.BorderSizePixel = 0
+	inputBox.PlaceholderText = "e.g. Roblox"
+	inputBox.PlaceholderColor3 = C.faint
+	inputBox.Text = ""
+	inputBox.ClearTextOnFocus = false
+	inputBox.Font = Enum.Font.GothamMedium
+	inputBox.TextSize = 14
+	inputBox.TextColor3 = C.text
+	inputBox.TextXAlignment = Enum.TextXAlignment.Left
+	inputBox.LayoutOrder = nextOrder(pcard)
+	inputBox.Parent = pcard
+	corner(inputBox, 8)
+	local inputPad = Instance.new("UIPadding")
+	inputPad.PaddingLeft = UDim.new(0, 12)
+	inputPad.Parent = inputBox
+	local inputStroke = stroke(inputBox, C.cardStroke, 1, 0)
+
+	inputBox.Focused:Connect(function()
+		tween(inputStroke, 0.2, {Color = C.gold})
+	end)
+	inputBox.FocusLost:Connect(function()
+		tween(inputStroke, 0.2, {Color = C.cardStroke})
+	end)
+
+	addHint(pcard, "Type a name and the player card appears on the right. Press Enter to teleport to the match.")
+
+	-- Target card (pops out when the typed name matches someone) ----
+	local tcard = makeCard(right, "Target")
+
+	local emptyBox = Instance.new("Frame")
+	emptyBox.Size = UDim2.new(1, 0, 0, 86)
+	emptyBox.BackgroundColor3 = C.field
+	emptyBox.BorderSizePixel = 0
+	emptyBox.LayoutOrder = nextOrder(tcard)
+	emptyBox.Parent = tcard
+	corner(emptyBox, 8)
+	stroke(emptyBox, C.cardStroke, 1, 0.3)
+	label(emptyBox, {
+		Text = "No player selected yet.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.faint,
+		Size = UDim2.fromScale(1, 1),
+	})
+
+	local info = Instance.new("Frame")
+	info.Name = "PlayerCard"
+	info.BackgroundTransparency = 1
+	info.Size = UDim2.new(1, 0, 0, 90)
+	info.Visible = false
+	info.LayoutOrder = nextOrder(tcard)
+	info.Parent = tcard
+
+	local cardScale = Instance.new("UIScale")
+	cardScale.Parent = info
+
+	local cardName = label(info, {
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.new(1, 0, 0, 20),
+	})
+	local cardSub = label(info, {
+		Text = "",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(0, 22),
+		Size = UDim2.new(1, 0, 0, 16),
+	})
+
+	-- Three equal buttons across the card (6px gaps)
+	local CARD_BTN_SIZE = UDim2.new(1 / 3, -4, 0, 34)
+
+	tpBtn = makeButton(info, "TELEPORT", "primary", 10)
+	tpBtn.Name = "TeleportButton"
+	tpBtn.Position = UDim2.new(0, 0, 0, 52)
+	tpBtn.Size = CARD_BTN_SIZE
+
+	cardSpecBtn = makeButton(info, "SPECTATE", "ghost", 10)
+	cardSpecBtn.Name = "SpectateButton"
+	cardSpecBtn.Position = UDim2.new(1 / 3, 2, 0, 52)
+	cardSpecBtn.Size = CARD_BTN_SIZE
+
+	cardEspBtn = makeButton(info, "ESP", "ghost", 10)
+	cardEspBtn.Name = "EspButton"
+	cardEspBtn.Position = UDim2.new(2 / 3, 4, 0, 52)
+	cardEspBtn.Size = CARD_BTN_SIZE
+
+	local function setCard(match)
+		local changed = (match ~= currentMatch)
+		currentMatch = match
+
+		if match then
+			cardName.Text = match.DisplayName
+			cardSub.Text = "@" .. match.Name .. (friendCache[match.UserId] and "  •  friend" or "")
+			emptyBox.Visible = false
+			if changed or not info.Visible then
+				info.Visible = true
+				cardScale.Scale = 0.9
+				tween(cardScale, 0.3, {Scale = 1}, Enum.EasingStyle.Back)
+			end
+		else
+			info.Visible = false
+			emptyBox.Visible = true
+		end
+		if updateUI then updateUI() end
+	end
+
+	inputBox:GetPropertyChangedSignal("Text"):Connect(function()
+		if inputBox.Text == "" then
+			setCard(nil)
+			setStatus("Ready", C.muted)
+			return
+		end
+		local match = findPlayer(inputBox.Text)
+		setCard(match)
+		if match then
+			setStatus(("Match: %s (@%s)"):format(match.DisplayName, match.Name), C.ok)
+		else
+			setStatus("No matching player", C.muted)
+		end
+	end)
+
+	-- If the matched player leaves, refresh the card
+	Players.PlayerRemoving:Connect(function()
+		task.defer(function()
+			if inputBox.Text ~= "" then setCard(findPlayer(inputBox.Text)) end
 		end)
-	end
-
-	----------------------------------------------------------------
-	-- Misc tab
-	----------------------------------------------------------------
-	local miscTab = createTab("Misc", "tune")
-
-	miscTab:CreateSection("ESP")
-
-	makeToggle(miscTab, "espAll", "ESP everyone", "Chams on every player in the server", false, function(on)
-		if on ~= espAll then setEspAll(on) end
 	end)
 
-	makeToggle(miscTab, "espNames", "ESP names", "Name tags above ESP'd players", true, function(on)
-		if on ~= espNames then setEspNames(on) end
+	tpBtn.MouseButton1Click:Connect(function()
+		if currentMatch then teleportTo(currentMatch) end
 	end)
+	cardSpecBtn.MouseButton1Click:Connect(function()
+		if not currentMatch then
+			setStatus("Player not found", C.err)
+		elseif spectating == currentMatch then
+			stopSpectating()
+		else
+			startSpectating(currentMatch)
+		end
+	end)
+	cardEspBtn.MouseButton1Click:Connect(function()
+		toggleEsp(currentMatch)
+	end)
+	inputBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			local target = currentMatch or findPlayer(inputBox.Text)
+			if target then teleportTo(target) else setStatus("Player not found", C.err) end
+		end
+	end)
+end
 
-	labels.espInfo = miscTab:CreateLabel({Text = "ESP active on 0 players", Style = 1})
+-- Page: Friends --------------------------------------------------------
+local friendsHeader, friendList, emptyLabel
+local makeFriendRow
 
-	miscTab:CreateButton({
-		Name = "Clear all ESP",
-		Description = "ESP keeps running when you close this window",
-		Callback = clearAllEsp,
+do
+	local fcard = Instance.new("Frame")
+	fcard.Name = "FriendsCard"
+	fcard.Size = UDim2.fromScale(1, 1)
+	fcard.BackgroundColor3 = C.card
+	fcard.BorderSizePixel = 0
+	fcard.Parent = friendsPage
+	corner(fcard, 9)
+	stroke(fcard, C.cardStroke, 1, 0)
+
+	local icon = Instance.new("Frame")
+	icon.BackgroundTransparency = 1
+	icon.Position = UDim2.fromOffset(12, 17)
+	icon.Size = UDim2.fromOffset(16, 16)
+	icon.Parent = fcard
+	corner(icon, 8)
+	stroke(icon, C.muted, 1, 0)
+	label(icon, {
+		Text = "i",
+		Font = Enum.Font.GothamBold,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		Size = UDim2.fromScale(1, 1),
 	})
 
-	miscTab:CreateSection("Camera")
+	friendsHeader = label(fcard, {
+		Text = "Friends in this server",
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(38, 12),
+		Size = UDim2.new(1, -50, 0, 26),
+	})
 
-	makeToggle(miscTab, "freecam", "Freecam", "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Key: P", false, function(on)
-		if on ~= freecamOn then
-			if on then startFreecam() else stopFreecam() end
-		end
-		updateUI()
-	end)
+	friendList = Instance.new("ScrollingFrame")
+	friendList.Name = "FriendList"
+	friendList.Position = UDim2.fromOffset(12, 48)
+	friendList.Size = UDim2.new(1, -24, 1, -60)
+	friendList.BackgroundTransparency = 1
+	friendList.BorderSizePixel = 0
+	friendList.ScrollBarThickness = 3
+	friendList.ScrollBarImageColor3 = C.faint
+	friendList.CanvasSize = UDim2.new()
+	friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	friendList.Parent = fcard
 
-	miscTab:CreateSection("Anti-AFK")
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = friendList
 
-	makeToggle(miscTab, "antiAfk", "Anti-AFK", "Stops you from being kicked for idling", false, function(on)
-		if on ~= antiAfkOn then setAntiAfk(on) end
-		updateUI()
-	end)
+	emptyLabel = label(fcard, {
+		Text = "No friends in this server",
+		Font = Enum.Font.Gotham,
+		TextSize = 13,
+		TextColor3 = C.faint,
+		Position = UDim2.fromOffset(0, 90),
+		Size = UDim2.new(1, 0, 0, 30),
+		Visible = false,
+	})
 
-	miscTab:CreateSection("Movement")
+	makeFriendRow = function(p, order)
+		local row = Instance.new("Frame")
+		row.Name = "Friend_" .. p.UserId
+		row.Size = UDim2.new(1, -8, 0, 46)
+		row.BackgroundColor3 = C.field
+		row.BackgroundTransparency = 1
+		row.BorderSizePixel = 0
+		row.LayoutOrder = order
+		row.Parent = friendList
+		corner(row, 8)
+		local rowStroke = stroke(row, C.cardStroke, 1, 1)
 
-	local ignoreSpeedCb = false
-	local speedSlider = miscTab:CreateSlider({
-		Name = "Walk speed",
-		Range = {SPEED_MIN, SPEED_MAX},
-		Increment = 1,
-		CurrentValue = SPEED_DEFAULT,
-		Callback = function(value)
-			if ignoreSpeedCb then return end
-			setSpeed(value)
-		end,
-	}, "walkSpeed")
+		label(row, {
+			Text = p.DisplayName,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(12, 5),
+			Size = UDim2.new(1, -230, 0, 20),
+		})
+		label(row, {
+			Text = "@" .. p.Name,
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(12, 24),
+			Size = UDim2.new(1, -230, 0, 16),
+		})
 
-	miscTab:CreateButton({
-		Name = "Reset walk speed",
-		Description = nil,
-		Callback = function()
+		-- right to left: ESP | SPECTATE | TP
+		local espBtn = makeButton(row, "ESP", "ghost", 10)
+		espBtn.Size = UDim2.fromOffset(52, 28)
+		espBtn.Position = UDim2.new(1, -62, 0.5, -14)
+
+		local specBtn = makeButton(row, "SPECTATE", "ghost", 10)
+		specBtn.Size = UDim2.fromOffset(84, 28)
+		specBtn.Position = UDim2.new(1, -152, 0.5, -14)
+
+		local tp = makeButton(row, "TP", "primary", 11)
+		tp.Size = UDim2.fromOffset(44, 28)
+		tp.Position = UDim2.new(1, -202, 0.5, -14)
+
+		tp.MouseButton1Click:Connect(function() teleportTo(p) end)
+		specBtn.MouseButton1Click:Connect(function()
+			if spectating == p then stopSpectating() else startSpectating(p) end
+		end)
+		espBtn.MouseButton1Click:Connect(function() toggleEsp(p) end)
+
+		rowSpecButtons[p.UserId] = specBtn
+		rowEspButtons[p.UserId]  = espBtn
+		tween(row, 0.3, {BackgroundTransparency = 0})
+		tween(rowStroke, 0.3, {Transparency = 0})
+	end
+end
+
+-- Page: Misc -------------------------------------------------------------
+do
+	local left  = makeColumn(allPage, "left")
+	local right = makeColumn(allPage, "right")
+
+	-- ESP everyone
+	do
+		local card, head = makeCard(left, "ESP everyone")
+		addSwitch(head, "espAll", function(on)
+			if on ~= espAll then setEspAll(on) end
+		end)
+		addHint(card, "Chams on every player in the server.")
+	end
+
+	-- ESP names
+	do
+		local card, head = makeCard(left, "ESP names")
+		addSwitch(head, "espNames", function(on)
+			if on ~= espNames then setEspNames(on) end
+		end)
+		addHint(card, "Name tags above ESP'd players.")
+	end
+
+	-- ESP status + clear
+	do
+		local card = makeCard(left, "ESP status")
+		allInfo = label(card, {
+			Text = "ESP active on 0 players",
+			Font = Enum.Font.GothamMedium,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, 0, 0, 20),
+			LayoutOrder = nextOrder(card),
+		})
+		addHint(card, "ESP keeps running when you close this window.")
+		local clearBtn = makeButton(card, "CLEAR ALL ESP", "ghost", 12)
+		clearBtn.Size = UDim2.new(1, 0, 0, 34)
+		clearBtn.LayoutOrder = nextOrder(card)
+		clearBtn.MouseButton1Click:Connect(clearAllEsp)
+	end
+
+	-- Freecam
+	do
+		local card, head = makeCard(right, "Freecam")
+		addSwitch(head, "freecam", function(on)
+			if on ~= freecamOn then toggleFreecam() end
+		end)
+		addHint(card, "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Key: P")
+	end
+
+	-- Anti-AFK
+	do
+		local card, head = makeCard(right, "Anti-AFK")
+		addSwitch(head, "antiAfk", function(on)
+			if on ~= antiAfkOn then setAntiAfk(on) end
+		end)
+		addHint(card, "Stops you from being kicked for idling.")
+	end
+
+	-- Walk speed
+	do
+		local card, head = makeCard(right, "Walk speed")
+		local speedValue = label(head, {
+			Text = tostring(SPEED_DEFAULT),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.fromOffset(60, 26),
+		})
+		local slider = makeSlider(card, right, SPEED_MIN, SPEED_MAX, SPEED_DEFAULT, speedValue,
+			function(v) setSpeed(v) end,
+			function() setStatus("Walk speed: " .. tostring(customSpeed), C.ok) end
+		)
+		local resetBtn = makeButton(card, "RESET WALK SPEED", "ghost", 12)
+		resetBtn.Name = "ResetSpeedButton"
+		resetBtn.Size = UDim2.new(1, 0, 0, 34)
+		resetBtn.LayoutOrder = nextOrder(card)
+		resetBtn.MouseButton1Click:Connect(function()
 			customSpeed = nil
-			ignoreSpeedCb = true
-			pcall(function() speedSlider:Set({CurrentValue = SPEED_DEFAULT}) end)
-			task.delay(0.4, function() ignoreSpeedCb = false end)
+			slider.set(SPEED_DEFAULT)
 			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 			if hum then hum.WalkSpeed = SPEED_DEFAULT end
 			setStatus("Walk speed reset", C.muted)
-		end,
-	})
+		end)
+	end
 
-	----------------------------------------------------------------
-	-- Tools tab
-	----------------------------------------------------------------
-	local toolsTab = createTab("Tools", "build")
-
-	toolsTab:CreateSection("Noclip")
-
-	makeToggle(toolsTab, "noclip", "Noclip", "Walk through walls", false, function(on)
-		setNoclip(on)
-	end)
-
-	toolsTab:CreateSection("Fly")
-
-	makeToggle(toolsTab, "fly", "Fly", "WASD in the direction you look, Space / E up, Ctrl / Q down", false, function(on)
-		if on ~= flyOn then
-			if on then startFly() else stopFly() end
-		end
-		updateUI()
-	end)
-
-	toolsTab:CreateSlider({
-		Name = "Fly speed",
-		Range = {10, 300},
-		Increment = 1,
-		CurrentValue = flySpeed,
-		Callback = function(value)
-			flySpeed = value
-		end,
-	}, "flySpeed")
-
-	toolsTab:CreateSection("Click teleport")
-
-	makeToggle(toolsTab, "clickTp", "Click TP", "When on, left click anywhere in the world to teleport there", false, function(on)
-		if on ~= clickTpOn then setClickTp(on) end
-	end)
-
-	----------------------------------------------------------------
-	-- VC tab
-	----------------------------------------------------------------
-	local vcTab = createTab("VC", "mic")
-
-	vcTab:CreateLabel({
-		Text = "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.",
-		Style = 1,
-	})
-
-	vcTab:CreateButton({
-		Name = "BYPASS VOICE CHAT",
-		Description = nil,
-		Callback = function()
-			task.spawn(runVoiceChat)
-		end,
-	})
+	setAntiAfk(true) -- on by default, like before
 end
 
-buildUI()
+-- Page: Tools --------------------------------------------------------------
+do
+	local left  = makeColumn(toolsPage, "left")
+	local right = makeColumn(toolsPage, "right")
+
+	-- Noclip
+	do
+		local card, head = makeCard(left, "Noclip")
+		addSwitch(head, "noclip", function(on) setNoclip(on) end)
+		addHint(card, "Walk through walls.")
+	end
+
+	-- Click teleport
+	do
+		local card, head = makeCard(left, "Click teleport")
+		addSwitch(head, "clickTp", function(on) setClickTp(on) end)
+		addHint(card, "When on, left click anywhere in the world to teleport there. When off, left click does nothing special.")
+	end
+
+	-- Fly
+	do
+		local card, head = makeCard(right, "Fly")
+		addSwitch(head, "fly", function(on)
+			if on ~= flyOn then toggleFly() end
+		end)
+		addHint(card, "WASD to move in the direction you look, Space / E up, Ctrl / Q down.")
+
+		local speedRow = Instance.new("Frame")
+		speedRow.BackgroundTransparency = 1
+		speedRow.Size = UDim2.new(1, 0, 0, 18)
+		speedRow.LayoutOrder = nextOrder(card)
+		speedRow.Parent = card
+		label(speedRow, {
+			Text = "Fly speed",
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, -60, 1, 0),
+		})
+		local flyValue = label(speedRow, {
+			Text = tostring(flySpeed),
+			Font = Enum.Font.GothamBold,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.fromOffset(60, 18),
+		})
+		makeSlider(card, right, 10, 300, flySpeed, flyValue, function(v)
+			flySpeed = v
+		end)
+	end
+end
+
+-- Page: VC ------------------------------------------------------------------
+do
+	local left  = makeColumn(vcPage, "left")
+	makeColumn(vcPage, "right")
+
+	local card = makeCard(left, "Voice chat")
+	addHint(card, "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.")
+
+	local vcInfoBtn = makeButton(card, "BYPASS VOICE CHAT", "ghost", 12)
+	vcInfoBtn.Name = "VoiceChatInfoButton"
+	vcInfoBtn.Size = UDim2.new(1, 0, 0, 36)
+	vcInfoBtn.LayoutOrder = nextOrder(card)
+	vcInfoBtn.MouseButton1Click:Connect(function()
+		task.spawn(runVoiceChat)
+	end)
+end
 
 --------------------------------------------------------------------
--- Sync every Luna element from the real state
+-- Sync every button from the real state
 --------------------------------------------------------------------
 updateUI = function()
-	syncToggle("espAll", espAll)
-	syncToggle("espNames", espNames)
-	syncToggle("freecam", freecamOn)
-	syncToggle("antiAfk", antiAfkOn)
-	syncToggle("noclip", noclipOn)
-	syncToggle("fly", flyOn)
-	syncToggle("clickTp", clickTpOn)
-
-	for _, sync in ipairs(targetSyncers) do sync() end
-
-	local n = countEsp()
-	setLabel("espInfo", ("ESP active on %d player%s"):format(n, n == 1 and "" or "s"))
-end
-
---------------------------------------------------------------------
--- Player counter + friend / match upkeep
---------------------------------------------------------------------
-local function updatePlayerCount()
-	setLabel("players", ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers))
-end
-updatePlayerCount()
-Players.PlayerAdded:Connect(updatePlayerCount)
-Players.PlayerRemoving:Connect(function(p)
-	friendCache[p.UserId] = nil
-	if currentMatch == p then
-		currentMatch = nil
-		setLabel("match", "Player left the server")
+	local function sw(key, state)
+		local s = switches[key]
+		if s then s.set(state and 2 or 1) end
 	end
-	if selectedFriend == p then selectedFriend = nil end
-	task.defer(function()
-		updatePlayerCount()
-		if scheduleFriendRefresh then scheduleFriendRefresh() end
-		updateUI()
-	end)
-end)
+	sw("espAll", espAll)
+	sw("espNames", espNames)
+	sw("freecam", freecamOn)
+	sw("antiAfk", antiAfkOn)
+	sw("noclip", noclipOn)
+	sw("fly", flyOn)
+	sw("clickTp", clickTpOn)
+
+	-- player card
+	local onCardSpec = spectating ~= nil and spectating == currentMatch
+	setToggleStyle(cardSpecBtn, onCardSpec, "STOP", "SPECTATE")
+	local onCardEsp = currentMatch ~= nil and currentMatch.Parent ~= nil and wantsEsp(currentMatch)
+	setToggleStyle(cardEspBtn, onCardEsp, "ESP ON", "ESP")
+
+	-- friend rows
+	for userId, btn in pairs(rowSpecButtons) do
+		local active = spectating ~= nil and spectating.UserId == userId
+		setToggleStyle(btn, active, "STOP", "SPECTATE")
+	end
+	for userId, btn in pairs(rowEspButtons) do
+		local p = Players:GetPlayerByUserId(userId)
+		setToggleStyle(btn, p ~= nil and wantsEsp(p), "ESP", "ESP")
+	end
+
+	-- Misc tab
+	if allInfo then
+		local n = countEsp()
+		allInfo.Text = ("ESP active on %d player%s"):format(n, n == 1 and "" or "s")
+	end
+
+	-- banner summary
+	local parts = {}
+	if spectating then table.insert(parts, "watching " .. spectating.DisplayName) end
+	if freecamOn then table.insert(parts, "freecam") end
+	if espAll then
+		table.insert(parts, "ESP: all")
+	else
+		local n = countEsp()
+		if n > 0 then table.insert(parts, "ESP: " .. n) end
+	end
+	bannerSummary.Text = table.concat(parts, "  |  ")
+end
+
+refreshFriends = function()
+	for _, child in ipairs(friendList:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	table.clear(rowSpecButtons)
+	table.clear(rowEspButtons)
+
+	local count = 0
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= player and p.Parent and friendCache[p.UserId] then
+			count += 1
+			makeFriendRow(p, count)
+		end
+	end
+
+	emptyLabel.Visible = (count == 0)
+	friendsHeader.Text = ("Friends in this server (%d)"):format(count)
+	updateUI()
+end
 
 Players.PlayerAdded:Connect(checkFriend)
+Players.PlayerRemoving:Connect(function(p)
+	friendCache[p.UserId] = nil
+	task.defer(refreshFriends)
+end)
 for _, p in ipairs(Players:GetPlayers()) do checkFriend(p) end
+refreshFriends()
 
 --------------------------------------------------------------------
--- Start
+-- Tab switching
 --------------------------------------------------------------------
-setAntiAfk(true) -- on by default, like before
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage}
+
+local function paintTabs(name)
+	for key, btn in pairs(TAB_BUTTONS) do
+		local active = (key == name)
+		tween(btn, 0.2, {
+			BackgroundTransparency = active and 0 or 1,
+			TextColor3 = active and C.gold or C.muted,
+		})
+	end
+end
+paintTabs(currentTab)
+
+local function switchTab(name)
+	if name == currentTab then return end
+	local fromIdx, toIdx = TAB_INDEX[currentTab], TAB_INDEX[name]
+	local hidePage, showPage = TAB_PAGES[currentTab], TAB_PAGES[name]
+	currentTab = name
+
+	paintTabs(name)
+
+	hidePage.Visible = false
+	showPage.Position = UDim2.fromOffset(toIdx > fromIdx and 54 or -26, 12)
+	showPage.Visible = true
+	tween(showPage, 0.35, {Position = PAGE_POS})
+
+	if name == "Friends" then refreshFriends() end
+	updateUI()
+end
+
+for key, btn in pairs(TAB_BUTTONS) do
+	btn.MouseButton1Click:Connect(function() switchTab(key) end)
+end
+
+--------------------------------------------------------------------
+-- Minimize / close / toggle
+--------------------------------------------------------------------
+local minimized = false
+
+local function setMinimized(state)
+	minimized = state
+	minBtn.Text = state and "+" or "–"
+	if state then
+		content.Visible = false
+		banner.Visible = false
+		tween(main, 0.35, {Size = MINI_SIZE}, Enum.EasingStyle.Back)
+	else
+		tween(main, 0.4, {Size = FULL_SIZE}, Enum.EasingStyle.Back)
+		task.delay(0.15, function()
+			if not minimized then
+				content.Visible = true
+				banner.Visible = true
+			end
+		end)
+	end
+end
+
+minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
+
+local visible = true
+local function setVisible(state)
+	visible = state
+	if state then
+		main.Visible = true
+		tween(mainScale, 0.45, {Scale = 1}, Enum.EasingStyle.Back)
+		-- Re-sync every button with the real ESP / spectate state, so the
+		-- window always matches what is actually happening in the game.
+		updateUI()
+	else
+		local tw = tween(mainScale, 0.25, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
+		tw.Completed:Connect(function()
+			if not visible then main.Visible = false end
+		end)
+		-- Note: ESP is intentionally NOT touched here. It keeps running.
+	end
+end
+
+closeBtn.MouseButton1Click:Connect(function()
+	setVisible(false) -- just hides it; press K to bring it back
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then return end
+	if input.KeyCode == Enum.KeyCode.K then
+		setVisible(not visible)
+	elseif input.KeyCode == Enum.KeyCode.P then
+		toggleFreecam()
+	end
+end)
+
+--------------------------------------------------------------------
+-- Dragging (by title bar)
+--------------------------------------------------------------------
+do
+	local dragging, dragStart, startPos
+
+	titleBar.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			main.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
+		end
+	end)
+end
+
+-- Intro pop-in
 updateUI()
-
-setStatus("KRHUB loaded. Press P for freecam.", C.ok)
+tween(mainScale, 0.6, {Scale = 1}, Enum.EasingStyle.Back)
