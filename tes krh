@@ -8,8 +8,9 @@
 	  Friends - your Roblox friends who are in the same server. Each row has
 	            TP, SPECTATE and ESP buttons.
 	  Misc    - scrollable. One switch to ESP (chams) everyone in the server,
-	            a toggle for the name tags above ESP'd players, and a
-	            walk speed slider at the bottom (scroll down to find it).
+	            a toggle for the name tags above ESP'd players, freecam,
+	            an Anti-AFK on/off toggle, and a walk speed slider at the
+	            bottom (scroll down to find it).
 
 	Controls:
 	  - Enter in the box teleports to the matched player
@@ -31,17 +32,6 @@ local RunService       = game:GetService("RunService")
 
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
-
-local VirtualUser = game:GetService("VirtualUser")
-local currentCamera = game.Workspace.CurrentCamera
-
-player.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.zero, currentCamera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.zero, currentCamera.CFrame)
-
-    print("player sucessfully unidled")
-end)
 
 print("script ran")
 
@@ -379,7 +369,7 @@ local updateUI                 -- re-syncs every button from the real state
 local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
 local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
 local cardSpecBtn, cardEspBtn  -- buttons on the player card
-local allEspBtn, namesBtn, allInfo, freecamBtn -- widgets on the Misc tab
+local allEspBtn, namesBtn, allInfo, freecamBtn, antiAfkBtn -- widgets on the Misc tab
 local stopFreecam              -- defined in the Misc section (spectate needs to call it)
 local currentMatch             -- player currently shown on the card
 
@@ -948,6 +938,114 @@ local function makeFriendRow(p, order)
 end
 
 --------------------------------------------------------------------
+-- Anti-AFK
+--------------------------------------------------------------------
+local VirtualUser = game:GetService("VirtualUser")
+
+local antiAfkOn     = false
+local antiAfkConn   = nil
+local antiAfkStored = {}   -- other Idled connections we paused: {conn = ..., enabled = true}
+local antiAfkMode   = nil  -- "VirtualUser" or "VIM"
+local antiAfkVIM    = nil
+
+local function disableAntiAfk()
+	if antiAfkConn then
+		pcall(function()
+			antiAfkConn:Disconnect()
+		end)
+		antiAfkConn = nil
+	end
+
+	for _, item in ipairs(antiAfkStored) do
+		if item.conn and item.enabled then
+			pcall(function()
+				item.conn:Enable()
+			end)
+		end
+	end
+
+	table.clear(antiAfkStored)
+	antiAfkMode = nil
+	antiAfkVIM = nil
+end
+
+local function enableAntiAfk()
+	if antiAfkConn then
+		return true
+	end
+
+	-- Pause any other Idled connections (restored in disableAntiAfk)
+	if typeof(getconnections) == "function" then
+		local ok, conns = pcall(getconnections, player.Idled)
+		if ok and type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				if c.Enabled ~= false then
+					local paused = pcall(function() c:Disable() end)
+					if paused then
+						table.insert(antiAfkStored, {conn = c, enabled = true})
+					end
+				end
+			end
+		end
+	end
+
+	-- Pick a method: VirtualUser first, VirtualInputManager as fallback
+	local okVU = pcall(function() VirtualUser:CaptureController() end)
+	if okVU then
+		antiAfkMode = "VirtualUser"
+	else
+		local okVIM, vim = pcall(function()
+			return game:GetService("VirtualInputManager")
+		end)
+		if okVIM and vim then
+			antiAfkMode = "VIM"
+			antiAfkVIM = vim
+		else
+			disableAntiAfk()
+			return false
+		end
+	end
+
+	antiAfkConn = player.Idled:Connect(function()
+		if antiAfkMode == "VirtualUser" then
+			pcall(function()
+				local cam = workspace.CurrentCamera
+				local cf = cam and cam.CFrame or CFrame.new()
+				VirtualUser:CaptureController()
+				VirtualUser:Button2Down(Vector2.zero, cf)
+				task.wait(1)
+				VirtualUser:Button2Up(Vector2.zero, cf)
+			end)
+		elseif antiAfkMode == "VIM" and antiAfkVIM then
+			pcall(function()
+				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+				task.wait(0.1)
+				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, false, game, 0)
+			end)
+		end
+	end)
+
+	return true
+end
+
+local function setAntiAfk(state)
+	if state then
+		if enableAntiAfk() then
+			antiAfkOn = true
+			setStatus("Anti-AFK on", C.ok)
+		else
+			antiAfkOn = false
+			setStatus("Anti-AFK unavailable here", C.err)
+		end
+	else
+		disableAntiAfk()
+		antiAfkOn = false
+		setStatus("Anti-AFK off", C.muted)
+	end
+	if updateUI then updateUI() end
+end
+
+--------------------------------------------------------------------
 -- Page: Misc  (scrollable: ESP controls + walk speed slider)
 --------------------------------------------------------------------
 local allPage = Instance.new("ScrollingFrame")
@@ -1168,6 +1266,25 @@ UserInputService.InputChanged:Connect(function(input, processed)
 		setStatus("Freecam speed: " .. math.floor(fcSpeed + 0.5), C.muted)
 	end
 end)
+
+-- Anti-AFK section ---------------------------------------------------
+label(allPage, {
+	Text = "Anti-AFK",
+	Font = Enum.Font.Gotham,
+	TextSize = 12,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	Size = UDim2.new(1, -8, 0, 16),
+	LayoutOrder = nextOrder(),
+})
+
+antiAfkBtn = makeButton(allPage, "ANTI-AFK: OFF", "ghost", 13)
+antiAfkBtn.Name = "AntiAfkButton"
+antiAfkBtn.Size = UDim2.new(1, -8, 0, 36)
+antiAfkBtn.LayoutOrder = nextOrder()
+antiAfkBtn.MouseButton1Click:Connect(function() setAntiAfk(not antiAfkOn) end)
+
+setAntiAfk(true) -- on by default, like the old version
 
 -- Walk speed section (scroll down to find it) ----------------------
 label(allPage, {
@@ -1729,6 +1846,300 @@ vcInfoBtn.Name = "VoiceChatInfoButton"
 vcInfoBtn.Size = UDim2.new(1, -8, 0, 36)
 vcInfoBtn.LayoutOrder = nextVCOrder()
 vcInfoBtn.MouseButton1Click:Connect(function()
+	local cloneref = cloneref or function(instance)
+    return instance
+end
+
+local function safeGetService(name)
+    local ok, service = pcall(function()
+        return game:GetService(name)
+    end)
+    return ok and service or nil
+end
+
+local voiceChatInternal = safeGetService("VoiceChatInternal")
+local coreGui = safeGetService("CoreGui")
+local players = safeGetService("Players")
+local localPlayer = players and players.LocalPlayer
+
+local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+
+local buttonSize = 35
+local offsetX = 54
+local offsetY = 6
+
+local function isMuted()
+    if not voiceChatInternal then
+        return false
+    end
+
+    local ok, paused = pcall(function()
+        return voiceChatInternal:IsPublishPaused()
+    end)
+
+    return ok and paused == true or false
+end
+
+local function setMuted(state)
+    if not voiceChatInternal then
+        warn("VoiceChatInternal is unavailable in this environment.")
+        return
+    end
+
+    local ok, err = pcall(function()
+        voiceChatInternal:PublishPause(state)
+    end)
+
+    if not ok then
+        warn("Could not change voice-chat mute state: " .. tostring(err))
+    end
+end
+
+local function getGuiParent()
+
+    if coreGui then
+        return cloneref(coreGui)
+    end
+
+    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+    return playerGui
+end
+
+local function hideExistingVoiceIcons()
+    local parent = getGuiParent()
+    if not parent then
+        return
+    end
+
+    local voiceGui = parent:FindFirstChild("VoiceChat")
+    if not voiceGui then
+        return
+    end
+
+    for _, descendant in ipairs(voiceGui:GetDescendants()) do
+        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+            descendant.ImageTransparency = 1
+        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+            descendant.TextTransparency = 1
+        end
+    end
+end
+
+local function refresh(icon)
+    if not icon or not icon.Parent then
+        return
+    end
+
+    icon.Image = isMuted() and mutedImage or talkingImage
+end
+
+local function createGui()
+    local parent = getGuiParent()
+    if not parent then
+        warn("Could not find a GUI parent for the voice-chat button.")
+        return
+    end
+
+    local previous = parent:FindFirstChild("CustomVoiceController")
+    if previous then
+        previous:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CustomVoiceController"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 999999
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = parent
+
+    local hitArea = Instance.new("TextButton")
+    hitArea.Name = "MicHitArea"
+    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
+    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
+    hitArea.BackgroundTransparency = 1
+    hitArea.Text = ""
+    hitArea.Active = true
+    hitArea.ZIndex = 10000
+    hitArea.Parent = screenGui
+
+    local icon = Instance.new("ImageLabel")
+    icon.Name = "MicIcon"
+    icon.Size = UDim2.fromScale(1, 1)
+    icon.Position = UDim2.fromOffset(0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Image = mutedImage
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.ZIndex = 10001
+    icon.Parent = hitArea
+
+    hitArea.Activated:Connect(function()
+        setMuted(not isMuted())
+        refresh(icon)
+    end)
+
+    hideExistingVoiceIcons()
+    refresh(icon)
+
+    -- Keep the icon in sync if the state changes elsewhere.
+    task.spawn(function()
+        while screenGui.Parent do
+            refresh(icon)
+            task.wait(0.25)
+        end
+    end)
+end
+
+createGui()
+local cloneref = cloneref or function(instance)
+    return instance
+end
+
+local function safeGetService(name)
+    local ok, service = pcall(function()
+        return game:GetService(name)
+    end)
+    return ok and service or nil
+end
+
+local voiceChatInternal = safeGetService("VoiceChatInternal")
+local coreGui = safeGetService("CoreGui")
+local players = safeGetService("Players")
+local localPlayer = players and players.LocalPlayer
+
+local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+
+local buttonSize = 35
+local offsetX = 54
+local offsetY = 6
+
+local function isMuted()
+    if not voiceChatInternal then
+        return false
+    end
+
+    local ok, paused = pcall(function()
+        return voiceChatInternal:IsPublishPaused()
+    end)
+
+    return ok and paused == true or false
+end
+
+local function setMuted(state)
+    if not voiceChatInternal then
+        warn("VoiceChatInternal is unavailable in this environment.")
+        return
+    end
+
+    local ok, err = pcall(function()
+        voiceChatInternal:PublishPause(state)
+    end)
+
+    if not ok then
+        warn("Could not change voice-chat mute state: " .. tostring(err))
+    end
+end
+
+local function getGuiParent()
+
+    if coreGui then
+        return cloneref(coreGui)
+    end
+
+    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+    return playerGui
+end
+
+local function hideExistingVoiceIcons()
+    local parent = getGuiParent()
+    if not parent then
+        return
+    end
+
+    local voiceGui = parent:FindFirstChild("VoiceChat")
+    if not voiceGui then
+        return
+    end
+
+    for _, descendant in ipairs(voiceGui:GetDescendants()) do
+        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+            descendant.ImageTransparency = 1
+        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+            descendant.TextTransparency = 1
+        end
+    end
+end
+
+local function refresh(icon)
+    if not icon or not icon.Parent then
+        return
+    end
+
+    icon.Image = isMuted() and mutedImage or talkingImage
+end
+
+local function createGui()
+    local parent = getGuiParent()
+    if not parent then
+        warn("Could not find a GUI parent for the voice-chat button.")
+        return
+    end
+
+    local previous = parent:FindFirstChild("CustomVoiceController")
+    if previous then
+        previous:Destroy()
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CustomVoiceController"
+    screenGui.ResetOnSpawn = false
+    screenGui.IgnoreGuiInset = true
+    screenGui.DisplayOrder = 999999
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = parent
+
+    local hitArea = Instance.new("TextButton")
+    hitArea.Name = "MicHitArea"
+    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
+    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
+    hitArea.BackgroundTransparency = 1
+    hitArea.Text = ""
+    hitArea.Active = true
+    hitArea.ZIndex = 10000
+    hitArea.Parent = screenGui
+
+    local icon = Instance.new("ImageLabel")
+    icon.Name = "MicIcon"
+    icon.Size = UDim2.fromScale(1, 1)
+    icon.Position = UDim2.fromOffset(0, 0)
+    icon.BackgroundTransparency = 1
+    icon.Image = mutedImage
+    icon.ScaleType = Enum.ScaleType.Fit
+    icon.ZIndex = 10001
+    icon.Parent = hitArea
+
+    hitArea.Activated:Connect(function()
+        setMuted(not isMuted())
+        refresh(icon)
+    end)
+
+    hideExistingVoiceIcons()
+    refresh(icon)
+
+    -- Keep the icon in sync if the state changes elsewhere.
+    task.spawn(function()
+        while screenGui.Parent do
+            refresh(icon)
+            task.wait(0.25)
+        end
+    end)
+end
+
+createGui()
+-- icon mute
+
     local d = cloneref or function(v)
     return v
 end
@@ -1855,6 +2266,7 @@ updateUI = function()
 	setToggleStyle(allEspBtn, espAll, "ESP EVERYONE: ON", "ESP EVERYONE: OFF")
 	setToggleStyle(namesBtn, espNames, "NAMES: ON", "NAMES: OFF")
 	setToggleStyle(freecamBtn, freecamOn, "FREECAM: ON", "FREECAM: OFF")
+	setToggleStyle(antiAfkBtn, antiAfkOn, "ANTI-AFK: ON", "ANTI-AFK: OFF")
 	if allInfo then
 		local n = countEsp()
 		allInfo.Text = ("ESP active on %d player%s"):format(n, n == 1 and "" or "s")
