@@ -1,27 +1,22 @@
 --[[
-	Teleport GUI  (LocalScript)
-	Put in: StarterPlayer > StarterPlayerScripts
+	KRHUB Teleport GUI  (LocalScript)
+	Style reference: BlurAutoClicker (dark cards, gold accent, OFF/ON switches)
 
-	Tabs:
-	  Teleport - type a username / display name. A player card appears with
-	            TELEPORT, SPECTATE and ESP buttons for that person.
-	  Friends - your Roblox friends who are in the same server. Each row has
-	            TP, SPECTATE and ESP buttons.
-	  Misc    - scrollable. One switch to ESP (chams) everyone in the server,
-	            a toggle for the name tags above ESP'd players, and a
-	            walk speed slider at the bottom (scroll down to find it).
+	Tabs (top left):
+	  Teleport - type a username / display name. A player card pops out with
+	             TELEPORT, SPECTATE and ESP buttons for that person.
+	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
+	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed.
+	  Tools    - noclip, fly (+ speed), click teleport.
+	  VC       - voice chat button.
 
 	Controls:
 	  - Enter in the box teleports to the matched player
 	  - Drag the title bar to move
 	  - "-" minimizes, "x" hides it
-	  - K (or RightShift) toggles show/hide
+	  - K toggles show/hide
 	  - P toggles freecam (WASD, E/Q, hold right mouse to look)
-
-	ESP note:
-	  ESP state lives in plain tables (espOn / espAll), completely separate
-	  from the GUI. Closing or reopening the window never touches it, and
-	  every time the window opens the buttons are re-synced from that state.
+	  - Slider value boxes are editable: type a number and press Enter
 ]]
 
 local Players          = game:GetService("Players")
@@ -32,36 +27,34 @@ local RunService       = game:GetService("RunService")
 local player    = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
-local VirtualUser = game:GetService("VirtualUser")
-local currentCamera = game.Workspace.CurrentCamera
-
-player.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.zero, currentCamera.CFrame)
-    task.wait(1)
-    VirtualUser:Button2Up(Vector2.zero, currentCamera.CFrame)
-
-    print("player sucessfully unidled")
-end)
-
 print("script ran")
 
 --------------------------------------------------------------------
--- Theme (black & white)
+-- Theme (dark cards, gold accent)
 --------------------------------------------------------------------
 local C = {
 	black      = Color3.fromRGB(0, 0, 0),
-	bg         = Color3.fromRGB(8, 8, 8),
-	panel      = Color3.fromRGB(22, 22, 22),
-	panelHover = Color3.fromRGB(42, 42, 42),
-	accent     = Color3.fromRGB(255, 255, 255),
-	text       = Color3.fromRGB(240, 240, 240),
-	muted      = Color3.fromRGB(125, 125, 125),
+	bg         = Color3.fromRGB(18, 18, 18),
+	bar        = Color3.fromRGB(13, 13, 13),
+	card       = Color3.fromRGB(27, 27, 27),
+	cardStroke = Color3.fromRGB(42, 42, 42),
+	field      = Color3.fromRGB(22, 22, 22),
+	segSel     = Color3.fromRGB(46, 46, 46),
+	accent     = Color3.fromRGB(255, 255, 255), -- ESP highlight color
+	text       = Color3.fromRGB(235, 235, 235),
+	muted      = Color3.fromRGB(135, 135, 135),
+	faint      = Color3.fromRGB(70, 70, 70),
+	gold       = Color3.fromRGB(226, 168, 34),
+	goldBg     = Color3.fromRGB(58, 47, 14),
+	goldLine   = Color3.fromRGB(96, 76, 22),
+	goldText   = Color3.fromRGB(205, 190, 150),
+	red        = Color3.fromRGB(200, 68, 60),
 	ok         = Color3.fromRGB(255, 255, 255),
-	err        = Color3.fromRGB(160, 160, 160),
+	err        = Color3.fromRGB(235, 120, 110),
 }
 
-local FULL_SIZE = UDim2.fromOffset(320, 340)
-local MINI_SIZE = UDim2.fromOffset(320, 42)
+local FULL_SIZE = UDim2.fromOffset(660, 420)
+local MINI_SIZE = UDim2.fromOffset(660, 40)
 
 --------------------------------------------------------------------
 -- Helpers
@@ -104,17 +97,53 @@ local function label(parent, props)
 	return l
 end
 
--- Hover + press "bounce" for any button
-local function makeInteractive(btn)
-	local scale = Instance.new("UIScale")
-	scale.Parent = btn
-	btn.MouseEnter:Connect(function() tween(scale, 0.15, {Scale = 1.05}) end)
-	btn.MouseLeave:Connect(function() tween(scale, 0.15, {Scale = 1}) end)
-	btn.MouseButton1Down:Connect(function() tween(scale, 0.08, {Scale = 0.94}) end)
-	btn.MouseButton1Up:Connect(function() tween(scale, 0.15, {Scale = 1.05}, Enum.EasingStyle.Back) end)
+-- Next LayoutOrder inside a container (keeps list order = creation order).
+-- FIX: a nil container used to crash here ("attempt to index nil with
+-- 'GetAttribute'"); it now just returns 0.
+local function nextOrder(container)
+	if not container then return 0 end
+	local n = (container:GetAttribute("n") or 0) + 1
+	container:SetAttribute("n", n)
+	return n
 end
 
--- Generic button. style = "primary" (white) or "ghost" (dark, outlined)
+-- Hover / press feedback by color only (no scaling, so nothing gets
+-- clipped by scrolling frames). The button's resting color lives in the
+-- "base" attribute, so toggle styles can change it and hover still works.
+local function makeInteractive(btn)
+	local function target()
+		local base = btn:GetAttribute("base") or btn.BackgroundColor3
+		if btn:GetAttribute("down") then
+			return base:Lerp(C.black, 0.3)
+		elseif btn:GetAttribute("hover") then
+			return base:Lerp(C.accent, 0.09)
+		end
+		return base
+	end
+	local function refresh()
+		tween(btn, 0.12, {BackgroundColor3 = target()})
+	end
+	btn.MouseEnter:Connect(function()
+		btn:SetAttribute("hover", true)
+		refresh()
+	end)
+	btn.MouseLeave:Connect(function()
+		btn:SetAttribute("hover", false)
+		btn:SetAttribute("down", false)
+		refresh()
+	end)
+	btn.MouseButton1Down:Connect(function()
+		btn:SetAttribute("down", true)
+		refresh()
+	end)
+	btn.MouseButton1Up:Connect(function()
+		btn:SetAttribute("down", false)
+		refresh()
+	end)
+	btn:GetAttributeChangedSignal("base"):Connect(refresh)
+end
+
+-- Generic button. style = "primary" (gold) or "ghost" (dark, outlined)
 local function makeButton(parent, text, style, textSize)
 	local b = Instance.new("TextButton")
 	b.Text = text
@@ -123,34 +152,106 @@ local function makeButton(parent, text, style, textSize)
 	b.AutoButtonColor = false
 	b.BorderSizePixel = 0
 	if style == "primary" then
-		b.BackgroundColor3 = C.accent
+		b.BackgroundColor3 = C.gold
 		b.TextColor3 = C.black
 	else
-		b.BackgroundColor3 = C.panelHover
+		b.BackgroundColor3 = C.field
 		b.TextColor3 = C.text
-		local s = stroke(b, C.accent, 1, 0.6)
-		s.Name = "Stroke"
 	end
 	b.Parent = parent
-	corner(b, 8)
+	corner(b, 7)
+	local s = stroke(b, style == "primary" and C.gold or C.cardStroke, 1, 0)
+	s.Name = "Stroke"
+	b:SetAttribute("base", b.BackgroundColor3)
 	makeInteractive(b)
 	return b
 end
 
--- Toggle look for ghost buttons (filled white when active)
+-- Toggle look for ghost buttons (gold when active)
 local function setToggleStyle(btn, active, activeText, idleText)
 	if not btn then return end
 	btn.Text = active and activeText or idleText
-	tween(btn, 0.2, {
-		BackgroundColor3 = active and C.accent or C.panelHover,
-		TextColor3 = active and C.black or C.text,
-	})
+	btn:SetAttribute("base", active and C.goldBg or C.field)
+	tween(btn, 0.2, {TextColor3 = active and C.gold or C.text})
 	local s = btn:FindFirstChild("Stroke")
-	if s then tween(s, 0.2, {Transparency = active and 1 or 0.6}) end
+	if s then tween(s, 0.2, {Color = active and C.gold or C.cardStroke}) end
 end
 
 local function trim(s)
 	return (tostring(s or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- Segmented control with a sliding highlight (used for the OFF / ON switches)
+local function makeSegmented(parent, options, size, selColors)
+	local n = #options
+	local api = {}
+	local current = 1
+
+	local frame = Instance.new("Frame")
+	frame.Size = size
+	frame.BackgroundColor3 = C.field
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	corner(frame, 7)
+	stroke(frame, C.cardStroke, 1, 0)
+
+	local inner = Instance.new("Frame")
+	inner.BackgroundTransparency = 1
+	inner.Position = UDim2.fromOffset(2, 2)
+	inner.Size = UDim2.new(1, -4, 1, -4)
+	inner.Parent = frame
+
+	local hl = Instance.new("Frame")
+	hl.Size = UDim2.new(1 / n, 0, 1, 0)
+	hl.BackgroundColor3 = C.segSel
+	hl.BorderSizePixel = 0
+	hl.Parent = inner
+	corner(hl, 5)
+
+	local buttons = {}
+
+	local function set(idx, instant)
+		current = idx
+		local pos = UDim2.new((idx - 1) / n, 0, 0, 0)
+		if instant then
+			hl.Position = pos
+		else
+			tween(hl, 0.22, {Position = pos}, Enum.EasingStyle.Quint)
+		end
+		for i, b in ipairs(buttons) do
+			local col = (i == idx) and (selColors[i] or C.text) or C.muted
+			if instant then
+				b.TextColor3 = col
+			else
+				tween(b, 0.2, {TextColor3 = col})
+			end
+		end
+	end
+
+	for i, text in ipairs(options) do
+		local b = Instance.new("TextButton")
+		b.Size = UDim2.new(1 / n, 0, 1, 0)
+		b.Position = UDim2.new((i - 1) / n, 0, 0, 0)
+		b.BackgroundTransparency = 1
+		b.Text = text
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 12
+		b.TextColor3 = C.muted
+		b.AutoButtonColor = false
+		b.ZIndex = 2
+		b.Parent = inner
+		buttons[i] = b
+		b.MouseButton1Click:Connect(function()
+			if current == i then return end
+			set(i)
+			if api.onSelect then api.onSelect(i) end
+		end)
+	end
+
+	api.frame = frame
+	api.set = set
+	set(1, true)
+	return api
 end
 
 --------------------------------------------------------------------
@@ -194,7 +295,7 @@ local function findPlayer(query)
 end
 
 --------------------------------------------------------------------
--- GUI
+-- GUI shell
 --------------------------------------------------------------------
 local old = playerGui:FindFirstChild("TeleportGui")
 if old then old:Destroy() end
@@ -214,54 +315,180 @@ main.BackgroundColor3 = C.bg
 main.BorderSizePixel = 0
 main.ClipsDescendants = true
 main.Parent = gui
-corner(main, 12)
+corner(main, 10)
+stroke(main, C.cardStroke, 1, 0)
 
 local mainScale = Instance.new("UIScale")
 mainScale.Scale = 0
 mainScale.Parent = main
 
--- White border that pulses
-local border = stroke(main, C.accent, 2, 0.1)
-
--- Title bar
+-- Title bar ---------------------------------------------------------
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
-titleBar.Size = UDim2.new(1, 0, 0, 42)
-titleBar.BackgroundColor3 = C.panel
+titleBar.Size = UDim2.new(1, 0, 0, 40)
+titleBar.BackgroundColor3 = C.bar
 titleBar.BorderSizePixel = 0
 titleBar.Parent = main
-corner(titleBar, 12)
+corner(titleBar, 10)
 
 local titlePatch = Instance.new("Frame")
 titlePatch.Size = UDim2.new(1, 0, 0, 12)
 titlePatch.Position = UDim2.new(0, 0, 1, -12)
-titlePatch.BackgroundColor3 = C.panel
+titlePatch.BackgroundColor3 = C.bar
 titlePatch.BorderSizePixel = 0
 titlePatch.Parent = titleBar
 
 label(titleBar, {
-	Text = "🍆  KRHUB",
+	Text = "KRHUB",
 	Font = Enum.Font.GothamBold,
-	TextSize = 15,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(14, 0),
-	Size = UDim2.fromOffset(110, 42),
+	TextSize = 14,
+	Size = UDim2.fromScale(1, 1),
 })
 
--- Player counter, right beside the title
-local playerCount = label(titleBar, {
+local function titleButton(text, xOffset)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.fromOffset(28, 26)
+	b.Position = UDim2.new(1, xOffset, 0.5, -13)
+	b.BackgroundColor3 = C.bar
+	b.BackgroundTransparency = 1
+	b.Text = text
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 16
+	b.TextColor3 = C.muted
+	b.AutoButtonColor = false
+	b.BorderSizePixel = 0
+	b.ZIndex = 2
+	b.Parent = titleBar
+	corner(b, 7)
+	b.MouseEnter:Connect(function()
+		tween(b, 0.12, {BackgroundTransparency = 0, BackgroundColor3 = C.segSel, TextColor3 = C.text})
+	end)
+	b.MouseLeave:Connect(function()
+		tween(b, 0.12, {BackgroundTransparency = 1, TextColor3 = C.muted})
+	end)
+	return b
+end
+
+local minBtn   = titleButton("–", -70)
+local closeBtn = titleButton("×", -38)
+
+-- Tab buttons (left side of the title bar). Active tab = gold text on a
+-- dark gold pill with a thin gold outline (like the icon tabs in the reference).
+local TAB_DEFS = {
+	{key = "Normal",  text = "Teleport", width = 66},
+	{key = "Friends", text = "Friends",  width = 58},
+	{key = "All",     text = "Misc",     width = 46},
+	{key = "Tools",   text = "Tools",    width = 50},
+	{key = "VC",      text = "VC",       width = 38},
+}
+local TAB_BUTTONS = {}
+local currentTab = "Normal"
+
+do
+	local x = 10
+	for _, def in ipairs(TAB_DEFS) do
+		local b = Instance.new("TextButton")
+		b.Name = def.key .. "Tab"
+		b.Size = UDim2.fromOffset(def.width, 28)
+		b.Position = UDim2.new(0, x, 0.5, -14)
+		b.BackgroundColor3 = C.goldBg
+		b.BackgroundTransparency = 1
+		b.Text = def.text
+		b.Font = Enum.Font.GothamBold
+		b.TextSize = 12
+		b.TextColor3 = C.muted
+		b.AutoButtonColor = false
+		b.BorderSizePixel = 0
+		b.ZIndex = 2
+		b.Parent = titleBar
+		corner(b, 7)
+		local ts = stroke(b, C.goldLine, 1, 1)
+		ts.Name = "Stroke"
+		b.MouseEnter:Connect(function()
+			if currentTab ~= def.key then tween(b, 0.12, {TextColor3 = C.text}) end
+		end)
+		b.MouseLeave:Connect(function()
+			if currentTab ~= def.key then tween(b, 0.12, {TextColor3 = C.muted}) end
+		end)
+		TAB_BUTTONS[def.key] = b
+		x += def.width + 4
+	end
+end
+
+-- Banner under the title bar: player count | status | active features
+local banner = Instance.new("Frame")
+banner.Name = "Banner"
+banner.Position = UDim2.fromOffset(0, 40)
+banner.Size = UDim2.new(1, 0, 0, 30)
+banner.BackgroundColor3 = C.goldBg
+banner.BorderSizePixel = 0
+banner.Parent = main
+
+local bannerLine = Instance.new("Frame")
+bannerLine.Position = UDim2.new(0, 0, 1, -1)
+bannerLine.Size = UDim2.new(1, 0, 0, 1)
+bannerLine.BackgroundColor3 = C.goldLine
+bannerLine.BorderSizePixel = 0
+bannerLine.Parent = banner
+
+local playerCount = label(banner, {
 	Text = "Players: 0",
 	Font = Enum.Font.GothamBold,
 	TextSize = 12,
-	TextColor3 = C.text,
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(124, 5),
-	Size = UDim2.new(1, -124 - 76, 0, 17),
+	Position = UDim2.fromOffset(14, 0),
+	Size = UDim2.new(0, 110, 1, 0),
 })
 
+-- Status text sits in the middle, like the version text in the reference
+local statusLabel = label(banner, {
+	Text = "Ready",
+	Font = Enum.Font.GothamMedium,
+	TextSize = 12,
+	TextColor3 = C.goldText,
+	TextXAlignment = Enum.TextXAlignment.Center,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(130, 0),
+	Size = UDim2.new(1, -130 - 200, 1, 0),
+})
+
+-- Active features show up as an outlined pill (like "Download and Install")
+local bannerSummary = label(banner, {
+	Text = "",
+	Font = Enum.Font.GothamMedium,
+	TextSize = 11,
+	TextColor3 = C.gold,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	AnchorPoint = Vector2.new(1, 0.5),
+	Position = UDim2.new(1, -14, 0.5, 0),
+	Size = UDim2.fromOffset(176, 20),
+	Visible = false,
+})
+bannerSummary.BackgroundTransparency = 0
+bannerSummary.BackgroundColor3 = Color3.fromRGB(40, 32, 10)
+corner(bannerSummary, 6)
+stroke(bannerSummary, C.gold, 1, 0.2)
+
+local function setStatus(text, color)
+	if color == nil or color == C.muted then
+		color = C.goldText
+	end
+	statusLabel.Text = text
+	statusLabel.TextColor3 = color
+	statusLabel.TextTransparency = 1
+	tween(statusLabel, 0.25, {TextTransparency = 0})
+end
+
+-- Content (everything under the banner)
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.BackgroundTransparency = 1
+content.Position = UDim2.fromOffset(0, 70)
+content.Size = UDim2.new(1, 0, 1, -70)
+content.Parent = main
+
 local function updatePlayerCount()
-	local n = #Players:GetPlayers()
-	playerCount.Text = ("Players: %d/%d"):format(n, Players.MaxPlayers)
+	playerCount.Text = ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers)
 end
 updatePlayerCount()
 Players.PlayerAdded:Connect(updatePlayerCount)
@@ -269,119 +496,18 @@ Players.PlayerRemoving:Connect(function()
 	task.defer(updatePlayerCount) -- the leaving player is still listed until after this event
 end)
 
--- Shows what's currently active (spectating / ESP / freecam), under the counter
-local titleSub = label(titleBar, {
-	Text = "",
-	Font = Enum.Font.Gotham,
-	TextSize = 10,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(124, 22),
-	Size = UDim2.new(1, -124 - 76, 0, 14),
-})
-
-local function titleButton(text, xOffset)
-	local b = Instance.new("TextButton")
-	b.Size = UDim2.fromOffset(26, 26)
-	b.Position = UDim2.new(1, xOffset, 0.5, -13)
-	b.BackgroundColor3 = C.panelHover
-	b.Text = text
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 16
-	b.TextColor3 = C.text
-	b.AutoButtonColor = false
-	b.Parent = titleBar
-	corner(b, 7)
-	makeInteractive(b)
-	return b
-end
-
-local minBtn   = titleButton("–", -68)
-local closeBtn = titleButton("×", -36)
-
--- Content (everything under the title bar)
-local content = Instance.new("Frame")
-content.Name = "Content"
-content.BackgroundTransparency = 1
-content.Position = UDim2.fromOffset(0, 42)
-content.Size = UDim2.new(1, 0, 1, -42)
-content.Parent = main
-
---------------------------------------------------------------------
--- Tab bar (Teleport / Friends / Misc)
---------------------------------------------------------------------
-local tabBar = Instance.new("Frame")
-tabBar.Name = "TabBar"
-tabBar.Position = UDim2.fromOffset(18, 8)
-tabBar.Size = UDim2.new(1, -36, 0, 32)
-tabBar.BackgroundColor3 = C.panel
-tabBar.BorderSizePixel = 0
-tabBar.Parent = content
-corner(tabBar, 8)
-
-local indicator = Instance.new("Frame")
-indicator.Name = "Indicator"
-indicator.Position = UDim2.new(0, 3, 0, 3)
-indicator.Size = UDim2.new(1 / 5, -6, 1, -6)
-indicator.BackgroundColor3 = C.accent
-indicator.BorderSizePixel = 0
-indicator.Parent = tabBar
-corner(indicator, 6)
-
-local function tabButton(text, index)
-	local b = Instance.new("TextButton")
-	b.Position = UDim2.fromScale((index - 1) / 5, 0)
-	b.Size = UDim2.fromScale(1 / 5, 1)
-	b.BackgroundTransparency = 1
-	b.Text = text
-	b.Font = Enum.Font.GothamBold
-	b.TextSize = 12
-	b.TextColor3 = C.muted
-	b.AutoButtonColor = false
-	b.ZIndex = 2
-	b.Parent = tabBar
-	return b
-end
-
-local normalTab  = tabButton("Teleport", 1)
-local friendsTab = tabButton("Friends", 2)
-local allTab     = tabButton("Misc", 3)
-local toolsTab   = tabButton("Tools", 4)
-local vcTab      = tabButton("VC", 5)
-normalTab.TextColor3 = C.black -- active tab sits on the white indicator
-
---------------------------------------------------------------------
--- Shared status line
---------------------------------------------------------------------
-local status = label(content, {
-	Text = "Ready",
-	Font = Enum.Font.Gotham,
-	TextSize = 13,
-	TextColor3 = C.muted,
-	Position = UDim2.new(0, 18, 1, -30),
-	Size = UDim2.new(1, -36, 0, 22),
-})
-
-local function setStatus(text, color)
-	status.Text = text
-	status.TextColor3 = color or C.muted
-	status.TextTransparency = 1
-	status.Position = UDim2.new(0, 18, 1, -24)
-	tween(status, 0.25, {TextTransparency = 0})
-	tween(status, 0.3, {Position = UDim2.new(0, 18, 1, -30)}, Enum.EasingStyle.Back)
-end
-
 --------------------------------------------------------------------
 -- Shared UI references (filled in once the pages are built)
 --------------------------------------------------------------------
 local updateUI                 -- re-syncs every button from the real state
+local switches = {}            -- [key] = OFF/ON segmented control
 local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
 local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
 local cardSpecBtn, cardEspBtn  -- buttons on the player card
-local allEspBtn, namesBtn, allInfo, freecamBtn -- widgets on the Misc tab
-local stopFreecam              -- defined in the Misc section (spectate needs to call it)
+local allInfo                  -- "ESP active on N players" label on Misc
+local stopFreecam              -- defined in the freecam section
 local currentMatch             -- player currently shown on the card
+local inputBox                 -- username box on the Teleport tab
 
 --------------------------------------------------------------------
 -- ESP (chams) - state is independent from the GUI
@@ -396,7 +522,6 @@ local function wantsEsp(p)
 	return espAll or espOn[p.UserId] == true
 end
 
--- Makes the world match the state for one player (create / keep / remove)
 local function applyHighlight(p)
 	if p == player then return end
 
@@ -423,7 +548,6 @@ local function applyHighlight(p)
 	end
 end
 
--- Name tag above the head (only while ESP is on AND names are enabled)
 local function applyNameTag(p)
 	if p == player then return end
 
@@ -465,7 +589,6 @@ local function applyNameTag(p)
 	end
 end
 
--- Makes the world match the state for one player (highlight + name tag)
 local function applyEsp(p)
 	applyHighlight(p)
 	applyNameTag(p)
@@ -526,7 +649,6 @@ local function clearAllEsp()
 	setStatus("All ESP cleared", C.muted)
 end
 
--- Keep ESP alive through respawns, joins and leaves
 local function setupEspPlayer(p)
 	if p == player then return end
 	p.CharacterAdded:Connect(function()
@@ -643,18 +765,15 @@ local function startSpectating(target)
 
 	task.spawn(attach, target.Character)
 
-	-- Follow them through respawns
 	table.insert(specConns, target.CharacterAdded:Connect(function(c)
 		task.spawn(attach, c)
 	end))
-	-- Stop if they leave
 	table.insert(specConns, Players.PlayerRemoving:Connect(function(p)
 		if p == target then
 			stopSpectating(true)
 			setStatus(target.DisplayName .. " left the server", C.muted)
 		end
 	end))
-	-- Stop if you respawn (camera resets to you anyway)
 	table.insert(specConns, player.CharacterAdded:Connect(function()
 		stopSpectating(true)
 	end))
@@ -663,399 +782,109 @@ local function startSpectating(target)
 	setStatus("Spectating " .. target.DisplayName, C.ok)
 end
 
-local function toggleSpectate(target)
-	if not target then
-		setStatus("Player not found", C.err)
-		return
+--------------------------------------------------------------------
+-- Anti-AFK
+--------------------------------------------------------------------
+local VirtualUser = game:GetService("VirtualUser")
+
+local antiAfkOn     = false
+local antiAfkConn   = nil
+local antiAfkStored = {}   -- other Idled connections we paused
+local antiAfkMode   = nil  -- "VirtualUser" or "VIM"
+local antiAfkVIM    = nil
+
+local function disableAntiAfk()
+	if antiAfkConn then
+		pcall(function() antiAfkConn:Disconnect() end)
+		antiAfkConn = nil
 	end
-	if spectating == target then
-		stopSpectating()
+
+	for _, item in ipairs(antiAfkStored) do
+		if item.conn and item.enabled then
+			pcall(function() item.conn:Enable() end)
+		end
+	end
+
+	table.clear(antiAfkStored)
+	antiAfkMode = nil
+	antiAfkVIM = nil
+end
+
+local function enableAntiAfk()
+	if antiAfkConn then return true end
+
+	if typeof(getconnections) == "function" then
+		local ok, conns = pcall(getconnections, player.Idled)
+		if ok and type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				if c.Enabled ~= false then
+					local paused = pcall(function() c:Disable() end)
+					if paused then
+						table.insert(antiAfkStored, {conn = c, enabled = true})
+					end
+				end
+			end
+		end
+	end
+
+	local okVU = pcall(function() VirtualUser:CaptureController() end)
+	if okVU then
+		antiAfkMode = "VirtualUser"
 	else
-		startSpectating(target)
+		local okVIM, vim = pcall(function()
+			return game:GetService("VirtualInputManager")
+		end)
+		if okVIM and vim then
+			antiAfkMode = "VIM"
+			antiAfkVIM = vim
+		else
+			disableAntiAfk()
+			return false
+		end
 	end
+
+	antiAfkConn = player.Idled:Connect(function()
+		if antiAfkMode == "VirtualUser" then
+			pcall(function()
+				local cam = workspace.CurrentCamera
+				local cf = cam and cam.CFrame or CFrame.new()
+				VirtualUser:CaptureController()
+				VirtualUser:Button2Down(Vector2.zero, cf)
+				task.wait(1)
+				VirtualUser:Button2Up(Vector2.zero, cf)
+			end)
+		elseif antiAfkMode == "VIM" and antiAfkVIM then
+			pcall(function()
+				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+				task.wait(0.1)
+				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, false, game, 0)
+			end)
+		end
+	end)
+
+	return true
 end
 
---------------------------------------------------------------------
--- Page: Normal  (input + player card)
---------------------------------------------------------------------
-local PAGE_POS  = UDim2.fromOffset(18, 50)
-local PAGE_SIZE = UDim2.new(1, -36, 1, -86)
-
-local normalPage = Instance.new("Frame")
-normalPage.Name = "NormalPage"
-normalPage.BackgroundTransparency = 1
-normalPage.Position = PAGE_POS
-normalPage.Size = PAGE_SIZE
-normalPage.Parent = content
-
-label(normalPage, {
-	Text = "Username or display name",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(0, 6),
-	Size = UDim2.new(1, 0, 0, 16),
-})
-
-local inputBox = Instance.new("TextBox")
-inputBox.Name = "UsernameInput"
-inputBox.Position = UDim2.fromOffset(0, 28)
-inputBox.Size = UDim2.new(1, 0, 0, 38)
-inputBox.BackgroundColor3 = C.panel
-inputBox.PlaceholderText = "e.g. Roblox"
-inputBox.PlaceholderColor3 = C.muted
-inputBox.Text = ""
-inputBox.ClearTextOnFocus = false
-inputBox.Font = Enum.Font.GothamMedium
-inputBox.TextSize = 15
-inputBox.TextColor3 = C.text
-inputBox.TextXAlignment = Enum.TextXAlignment.Left
-inputBox.Parent = normalPage
-corner(inputBox, 8)
-local inputPad = Instance.new("UIPadding")
-inputPad.PaddingLeft = UDim.new(0, 12)
-inputPad.Parent = inputBox
-local inputStroke = stroke(inputBox, C.muted, 1.5, 0.6)
-
-inputBox.Focused:Connect(function()
-	tween(inputStroke, 0.2, {Color = C.accent, Transparency = 0.1})
-end)
-inputBox.FocusLost:Connect(function()
-	tween(inputStroke, 0.2, {Color = C.muted, Transparency = 0.6})
-end)
-
--- Hint shown while there's no match
-local hint = label(normalPage, {
-	Text = "Type a name to teleport, spectate or ESP",
-	Font = Enum.Font.Gotham,
-	TextSize = 13,
-	TextColor3 = C.muted,
-	Position = UDim2.fromOffset(0, 90),
-	Size = UDim2.new(1, 0, 0, 30),
-})
-
--- Player card (appears when the typed name matches someone)
-local card = Instance.new("Frame")
-card.Name = "PlayerCard"
-card.Position = UDim2.fromOffset(0, 76)
-card.Size = UDim2.new(1, 0, 0, 96)
-card.BackgroundColor3 = C.panel
-card.BorderSizePixel = 0
-card.Visible = false
-card.Parent = normalPage
-corner(card, 10)
-stroke(card, C.accent, 1, 0.8)
-
-local cardScale = Instance.new("UIScale")
-cardScale.Parent = card
-
-local cardName = label(card, {
-	Text = "",
-	Font = Enum.Font.GothamBold,
-	TextSize = 15,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(12, 8),
-	Size = UDim2.new(1, -24, 0, 20),
-})
-local cardSub = label(card, {
-	Text = "",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(12, 28),
-	Size = UDim2.new(1, -24, 0, 16),
-})
-
--- Three equal buttons across the card (10px edges, 5px gaps)
-local function cardButtonPos(i)
-	return UDim2.new(i / 3, 10 - 5 * i, 0, 52)
-end
-local CARD_BTN_SIZE = UDim2.new(1 / 3, -10, 0, 34)
-
-tpBtn = makeButton(card, "TELEPORT", "primary", 11)
-tpBtn.Name = "TeleportButton"
-tpBtn.Position = cardButtonPos(0)
-tpBtn.Size = CARD_BTN_SIZE
-
-cardSpecBtn = makeButton(card, "SPECTATE", "ghost", 11)
-cardSpecBtn.Name = "SpectateButton"
-cardSpecBtn.Position = cardButtonPos(1)
-cardSpecBtn.Size = CARD_BTN_SIZE
-
-cardEspBtn = makeButton(card, "ESP", "ghost", 11)
-cardEspBtn.Name = "EspButton"
-cardEspBtn.Position = cardButtonPos(2)
-cardEspBtn.Size = CARD_BTN_SIZE
-
-local function setCard(match)
-	local changed = (match ~= currentMatch)
-	currentMatch = match
-
-	if match then
-		cardName.Text = match.DisplayName
-		cardSub.Text = "@" .. match.Name .. (friendCache[match.UserId] and "  •  friend" or "")
-		hint.Visible = false
-		if changed or not card.Visible then
-			card.Visible = true
-			cardScale.Scale = 0.92
-			tween(cardScale, 0.3, {Scale = 1}, Enum.EasingStyle.Back)
+local function setAntiAfk(state)
+	if state then
+		if enableAntiAfk() then
+			antiAfkOn = true
+			setStatus("Anti-AFK on", C.ok)
+		else
+			antiAfkOn = false
+			setStatus("Anti-AFK unavailable here", C.err)
 		end
 	else
-		card.Visible = false
-		hint.Visible = true
+		disableAntiAfk()
+		antiAfkOn = false
+		setStatus("Anti-AFK off", C.muted)
 	end
 	if updateUI then updateUI() end
 end
 
-inputBox:GetPropertyChangedSignal("Text"):Connect(function()
-	if inputBox.Text == "" then
-		setCard(nil)
-		setStatus("Ready", C.muted)
-		return
-	end
-	local match = findPlayer(inputBox.Text)
-	setCard(match)
-	if match then
-		setStatus(("Match: %s (@%s)"):format(match.DisplayName, match.Name), C.ok)
-	else
-		setStatus("No matching player", C.muted)
-	end
-end)
-
--- If the matched player leaves, refresh the card
-Players.PlayerRemoving:Connect(function()
-	task.defer(function()
-		if inputBox.Text ~= "" then setCard(findPlayer(inputBox.Text)) end
-	end)
-end)
-
-tpBtn.MouseButton1Click:Connect(function()
-	if currentMatch then teleportTo(currentMatch) end
-end)
-cardSpecBtn.MouseButton1Click:Connect(function()
-	toggleSpectate(currentMatch)
-end)
-cardEspBtn.MouseButton1Click:Connect(function()
-	toggleEsp(currentMatch)
-end)
-inputBox.FocusLost:Connect(function(enterPressed)
-	if enterPressed then
-		local target = currentMatch or findPlayer(inputBox.Text)
-		if target then teleportTo(target) else setStatus("Player not found", C.err) end
-	end
-end)
-
 --------------------------------------------------------------------
--- Page: Friends
+-- Freecam
 --------------------------------------------------------------------
-local friendsPage = Instance.new("Frame")
-friendsPage.Name = "FriendsPage"
-friendsPage.BackgroundTransparency = 1
-friendsPage.Position = PAGE_POS
-friendsPage.Size = PAGE_SIZE
-friendsPage.Visible = false
-friendsPage.Parent = content
-
-local friendsHeader = label(friendsPage, {
-	Text = "Friends in this server",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(0, 6),
-	Size = UDim2.new(1, 0, 0, 16),
-})
-
-local friendList = Instance.new("ScrollingFrame")
-friendList.Name = "FriendList"
-friendList.Position = UDim2.fromOffset(0, 28)
-friendList.Size = UDim2.new(1, 0, 1, -28)
-friendList.BackgroundTransparency = 1
-friendList.BorderSizePixel = 0
-friendList.ScrollBarThickness = 3
-friendList.ScrollBarImageColor3 = C.accent
-friendList.CanvasSize = UDim2.new()
-friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-friendList.Parent = friendsPage
-
-local listLayout = Instance.new("UIListLayout")
-listLayout.Padding = UDim.new(0, 6)
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Parent = friendList
-
-local emptyLabel = label(friendsPage, {
-	Text = "No friends in this server",
-	Font = Enum.Font.Gotham,
-	TextSize = 13,
-	TextColor3 = C.muted,
-	Position = UDim2.fromOffset(0, 60),
-	Size = UDim2.new(1, 0, 0, 30),
-	Visible = false,
-})
-
-local function makeFriendRow(p, order)
-	local row = Instance.new("Frame")
-	row.Name = "Friend_" .. p.UserId
-	row.Size = UDim2.new(1, -6, 0, 42)
-	row.BackgroundColor3 = C.panel
-	row.BackgroundTransparency = 1
-	row.LayoutOrder = order
-	row.Parent = friendList
-	corner(row, 8)
-
-	label(row, {
-		Text = p.DisplayName,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Position = UDim2.fromOffset(12, 4),
-		Size = UDim2.new(1, -164, 0, 20),
-	})
-	label(row, {
-		Text = "@" .. p.Name,
-		Font = Enum.Font.Gotham,
-		TextSize = 11,
-		TextColor3 = C.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Position = UDim2.fromOffset(12, 22),
-		Size = UDim2.new(1, -164, 0, 14),
-	})
-
-	-- right to left: ESP | SPECTATE | TP
-	local espBtn = makeButton(row, "ESP", "ghost", 10)
-	espBtn.Size = UDim2.fromOffset(40, 26)
-	espBtn.Position = UDim2.new(1, -46, 0.5, -13)
-
-	local specBtn = makeButton(row, "SPECTATE", "ghost", 9)
-	specBtn.Size = UDim2.fromOffset(62, 26)
-	specBtn.Position = UDim2.new(1, -112, 0.5, -13)
-
-	local tp = makeButton(row, "TP", "primary", 11)
-	tp.Size = UDim2.fromOffset(34, 26)
-	tp.Position = UDim2.new(1, -150, 0.5, -13)
-
-	tp.MouseButton1Click:Connect(function() teleportTo(p) end)
-	specBtn.MouseButton1Click:Connect(function() toggleSpectate(p) end)
-	espBtn.MouseButton1Click:Connect(function() toggleEsp(p) end)
-
-	rowSpecButtons[p.UserId] = specBtn
-	rowEspButtons[p.UserId]  = espBtn
-	tween(row, 0.3, {BackgroundTransparency = 0})
-end
-
---------------------------------------------------------------------
--- Page: Misc  (scrollable: ESP controls + walk speed slider)
---------------------------------------------------------------------
-local allPage = Instance.new("ScrollingFrame")
-allPage.Name = "AllPage"
-allPage.BackgroundTransparency = 1
-allPage.BorderSizePixel = 0
-allPage.Position = PAGE_POS
-allPage.Size = PAGE_SIZE
-allPage.Visible = false
-allPage.ScrollBarThickness = 3
-allPage.ScrollBarImageColor3 = C.accent
-allPage.ScrollingDirection = Enum.ScrollingDirection.Y
-allPage.CanvasSize = UDim2.new()
-allPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
-allPage.Parent = content
-
-local allLayout = Instance.new("UIListLayout")
-allLayout.Padding = UDim.new(0, 8)
-allLayout.SortOrder = Enum.SortOrder.LayoutOrder
-allLayout.Parent = allPage
-
-local allPad = Instance.new("UIPadding")
-allPad.PaddingBottom = UDim.new(0, 10)
-allPad.Parent = allPage
-
-local allOrder = 0
-local function nextOrder()
-	allOrder += 1
-	return allOrder
-end
-
--- ESP section ------------------------------------------------------
-label(allPage, {
-	Text = "ESP for everyone",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Size = UDim2.new(1, -8, 0, 16),
-	LayoutOrder = nextOrder(),
-})
-
-allEspBtn = makeButton(allPage, "ESP EVERYONE: OFF", "ghost", 13)
-allEspBtn.Name = "EspAllButton"
-allEspBtn.Size = UDim2.new(1, -8, 0, 36)
-allEspBtn.LayoutOrder = nextOrder()
-
-namesBtn = makeButton(allPage, "NAMES: ON", "ghost", 12)
-namesBtn.Name = "EspNamesButton"
-namesBtn.Size = UDim2.new(1, -8, 0, 34)
-namesBtn.LayoutOrder = nextOrder()
-
-allInfo = label(allPage, {
-	Text = "ESP active on 0 players",
-	Font = Enum.Font.GothamMedium,
-	TextSize = 13,
-	TextColor3 = C.text,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Size = UDim2.new(1, -8, 0, 20),
-	LayoutOrder = nextOrder(),
-})
-
-label(allPage, {
-	Text = "ESP keeps running when you close this window.",
-	Font = Enum.Font.Gotham,
-	TextSize = 11,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Size = UDim2.new(1, -8, 0, 16),
-	LayoutOrder = nextOrder(),
-})
-
-local clearBtn = makeButton(allPage, "CLEAR ALL ESP", "ghost", 12)
-clearBtn.Size = UDim2.new(1, -8, 0, 34)
-clearBtn.LayoutOrder = nextOrder()
-
-allEspBtn.MouseButton1Click:Connect(function() setEspAll(not espAll) end)
-namesBtn.MouseButton1Click:Connect(function() setEspNames(not espNames) end)
-clearBtn.MouseButton1Click:Connect(clearAllEsp)
-
--- Freecam section --------------------------------------------------
-label(allPage, {
-	Text = "Camera",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Size = UDim2.new(1, -8, 0, 16),
-	LayoutOrder = nextOrder(),
-})
-
-freecamBtn = makeButton(allPage, "FREECAM: OFF", "ghost", 13)
-freecamBtn.Name = "FreecamButton"
-freecamBtn.Size = UDim2.new(1, -8, 0, 36)
-freecamBtn.LayoutOrder = nextOrder()
-
-label(allPage, {
-	Text = "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Key: P",
-	Font = Enum.Font.Gotham,
-	TextSize = 11,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextYAlignment = Enum.TextYAlignment.Top,
-	TextWrapped = true,
-	Size = UDim2.new(1, -8, 0, 30),
-	LayoutOrder = nextOrder(),
-})
-
 local FC_MIN, FC_MAX = 5, 300
 local fcSpeed = 50
 local freecamOn = false
@@ -1063,8 +892,6 @@ local fcConn
 local fcPos = Vector3.zero
 local fcPitch, fcYaw = 0, 0
 
--- The default control module is switched off during freecam so your
--- character stands still while the camera flies around.
 local function getControls()
 	local ok, controls = pcall(function()
 		local module = player:WaitForChild("PlayerScripts"):WaitForChild("PlayerModule", 3)
@@ -1158,9 +985,6 @@ local function toggleFreecam()
 	if freecamOn then stopFreecam() else startFreecam() end
 end
 
-freecamBtn.MouseButton1Click:Connect(toggleFreecam)
-
--- Mouse wheel changes the freecam speed
 UserInputService.InputChanged:Connect(function(input, processed)
 	if freecamOn and not processed and input.UserInputType == Enum.UserInputType.MouseWheel then
 		local factor = input.Position.Z > 0 and 1.15 or (1 / 1.15)
@@ -1169,17 +993,9 @@ UserInputService.InputChanged:Connect(function(input, processed)
 	end
 end)
 
--- Walk speed section (scroll down to find it) ----------------------
-label(allPage, {
-	Text = "Movement",
-	Font = Enum.Font.Gotham,
-	TextSize = 12,
-	TextColor3 = C.muted,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Size = UDim2.new(1, -8, 0, 16),
-	LayoutOrder = nextOrder(),
-})
-
+--------------------------------------------------------------------
+-- Walk speed
+--------------------------------------------------------------------
 local SPEED_MIN, SPEED_MAX, SPEED_DEFAULT = 0, 200, 16
 local customSpeed = nil -- nil = don't touch the game's WalkSpeed
 
@@ -1191,7 +1007,6 @@ local function enforceSpeed()
 	end
 end
 
--- Keep the custom speed through respawns and games that reset it
 local speedConn
 local function hookCharacter(char)
 	if speedConn then speedConn:Disconnect() speedConn = nil end
@@ -1203,288 +1018,18 @@ end
 player.CharacterAdded:Connect(hookCharacter)
 if player.Character then task.spawn(hookCharacter, player.Character) end
 
-local speedBox = Instance.new("Frame")
-speedBox.Name = "WalkSpeedBox"
-speedBox.Size = UDim2.new(1, -8, 0, 74)
-speedBox.BackgroundColor3 = C.panel
-speedBox.BorderSizePixel = 0
-speedBox.LayoutOrder = nextOrder()
-speedBox.Parent = allPage
-corner(speedBox, 8)
-
-label(speedBox, {
-	Text = "Walk speed",
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Position = UDim2.fromOffset(12, 8),
-	Size = UDim2.new(1, -90, 0, 18),
-})
-
-local speedValue = label(speedBox, {
-	Text = tostring(SPEED_DEFAULT),
-	Font = Enum.Font.GothamBold,
-	TextXAlignment = Enum.TextXAlignment.Right,
-	Position = UDim2.new(1, -72, 0, 8),
-	Size = UDim2.fromOffset(60, 18),
-})
-
--- Invisible, taller hit area so the slider is easy to grab
-local sliderHit = Instance.new("TextButton")
-sliderHit.Name = "SliderHit"
-sliderHit.Text = ""
-sliderHit.AutoButtonColor = false
-sliderHit.BackgroundTransparency = 1
-sliderHit.Position = UDim2.new(0, 12, 0, 36)
-sliderHit.Size = UDim2.new(1, -24, 0, 28)
-sliderHit.Parent = speedBox
-
-local track = Instance.new("Frame")
-track.Position = UDim2.new(0, 0, 0.5, -3)
-track.Size = UDim2.new(1, 0, 0, 6)
-track.BackgroundColor3 = C.panelHover
-track.BorderSizePixel = 0
-track.Parent = sliderHit
-corner(track, 3)
-
-local fill = Instance.new("Frame")
-fill.Size = UDim2.fromScale(0, 1)
-fill.BackgroundColor3 = C.accent
-fill.BorderSizePixel = 0
-fill.Parent = track
-corner(fill, 3)
-
-local knob = Instance.new("Frame")
-knob.AnchorPoint = Vector2.new(0.5, 0.5)
-knob.Size = UDim2.fromOffset(16, 16)
-knob.Position = UDim2.fromScale(0, 0.5)
-knob.BackgroundColor3 = C.accent
-knob.BorderSizePixel = 0
-knob.ZIndex = 2
-knob.Parent = track
-corner(knob, 8)
-
-local function updateSliderVisual(value)
-	local alpha = (value - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)
-	fill.Size = UDim2.fromScale(alpha, 1)
-	knob.Position = UDim2.fromScale(alpha, 0.5)
-	speedValue.Text = tostring(value)
-end
-updateSliderVisual(SPEED_DEFAULT)
-
 local function setSpeed(value)
 	value = math.clamp(math.round(value), SPEED_MIN, SPEED_MAX)
 	customSpeed = value
-	updateSliderVisual(value)
 	enforceSpeed()
 end
 
-local draggingSpeed = false
-
-local function setFromInput(input)
-	local alpha = math.clamp(
-		(input.Position.X - sliderHit.AbsolutePosition.X) / sliderHit.AbsoluteSize.X, 0, 1
-	)
-	setSpeed(SPEED_MIN + alpha * (SPEED_MAX - SPEED_MIN))
-end
-
-sliderHit.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		draggingSpeed = true
-		allPage.ScrollingEnabled = false -- don't scroll the page while sliding
-		setFromInput(input)
-	end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-	if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseMovement
-		or input.UserInputType == Enum.UserInputType.Touch) then
-		setFromInput(input)
-	end
-end)
-
-UserInputService.InputEnded:Connect(function(input)
-	if draggingSpeed and (input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch) then
-		draggingSpeed = false
-		allPage.ScrollingEnabled = true
-		setStatus("Walk speed: " .. tostring(customSpeed), C.ok)
-	end
-end)
-
-local resetSpeedBtn = makeButton(allPage, "RESET WALK SPEED", "ghost", 12)
-resetSpeedBtn.Name = "ResetSpeedButton"
-resetSpeedBtn.Size = UDim2.new(1, -8, 0, 34)
-resetSpeedBtn.LayoutOrder = nextOrder()
-resetSpeedBtn.MouseButton1Click:Connect(function()
-	customSpeed = nil
-	updateSliderVisual(SPEED_DEFAULT)
-	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-	if hum then hum.WalkSpeed = SPEED_DEFAULT end
-	setStatus("Walk speed reset", C.muted)
-end)
-
 --------------------------------------------------------------------
--- Page: Tools  (noclip, fly, click teleport)
+-- Noclip
 --------------------------------------------------------------------
-local toolsPage = Instance.new("ScrollingFrame")
-toolsPage.Name = "ToolsPage"
-toolsPage.BackgroundTransparency = 1
-toolsPage.BorderSizePixel = 0
-toolsPage.Position = PAGE_POS
-toolsPage.Size = PAGE_SIZE
-toolsPage.Visible = false
-toolsPage.ScrollBarThickness = 3
-toolsPage.ScrollBarImageColor3 = C.accent
-toolsPage.ScrollingDirection = Enum.ScrollingDirection.Y
-toolsPage.CanvasSize = UDim2.new()
-toolsPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
-toolsPage.Parent = content
-
-local toolsLayout = Instance.new("UIListLayout")
-toolsLayout.Padding = UDim.new(0, 8)
-toolsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-toolsLayout.Parent = toolsPage
-
-local toolsPad = Instance.new("UIPadding")
-toolsPad.PaddingBottom = UDim.new(0, 10)
-toolsPad.Parent = toolsPage
-
-local toolsOrder = 0
-local function nextToolsOrder()
-	toolsOrder += 1
-	return toolsOrder
-end
-
-local function toolsHeading(text)
-	label(toolsPage, {
-		Text = text,
-		Font = Enum.Font.Gotham,
-		TextSize = 12,
-		TextColor3 = C.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Size = UDim2.new(1, -8, 0, 16),
-		LayoutOrder = nextToolsOrder(),
-	})
-end
-
-local function toolsHint(text, height)
-	label(toolsPage, {
-		Text = text,
-		Font = Enum.Font.Gotham,
-		TextSize = 11,
-		TextColor3 = C.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		TextWrapped = true,
-		Size = UDim2.new(1, -8, 0, height or 16),
-		LayoutOrder = nextToolsOrder(),
-	})
-end
-
--- Reusable slider (same look as the walk speed slider)
-local function makeSlider(titleText, minV, maxV, defaultV, onChange)
-	local box = Instance.new("Frame")
-	box.Size = UDim2.new(1, -8, 0, 74)
-	box.BackgroundColor3 = C.panel
-	box.BorderSizePixel = 0
-	box.LayoutOrder = nextToolsOrder()
-	box.Parent = toolsPage
-	corner(box, 8)
-
-	label(box, {
-		Text = titleText,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.fromOffset(12, 8),
-		Size = UDim2.new(1, -90, 0, 18),
-	})
-	local valueLabel = label(box, {
-		Text = tostring(defaultV),
-		Font = Enum.Font.GothamBold,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Position = UDim2.new(1, -72, 0, 8),
-		Size = UDim2.fromOffset(60, 18),
-	})
-
-	local hit = Instance.new("TextButton")
-	hit.Text = ""
-	hit.AutoButtonColor = false
-	hit.BackgroundTransparency = 1
-	hit.Position = UDim2.new(0, 12, 0, 36)
-	hit.Size = UDim2.new(1, -24, 0, 28)
-	hit.Parent = box
-
-	local track = Instance.new("Frame")
-	track.Position = UDim2.new(0, 0, 0.5, -3)
-	track.Size = UDim2.new(1, 0, 0, 6)
-	track.BackgroundColor3 = C.panelHover
-	track.BorderSizePixel = 0
-	track.Parent = hit
-	corner(track, 3)
-
-	local fill = Instance.new("Frame")
-	fill.BackgroundColor3 = C.accent
-	fill.BorderSizePixel = 0
-	fill.Parent = track
-	corner(fill, 3)
-
-	local knob = Instance.new("Frame")
-	knob.AnchorPoint = Vector2.new(0.5, 0.5)
-	knob.Size = UDim2.fromOffset(16, 16)
-	knob.BackgroundColor3 = C.accent
-	knob.BorderSizePixel = 0
-	knob.ZIndex = 2
-	knob.Parent = track
-	corner(knob, 8)
-
-	local function visual(v)
-		local alpha = (v - minV) / (maxV - minV)
-		fill.Size = UDim2.fromScale(alpha, 1)
-		knob.Position = UDim2.fromScale(alpha, 0.5)
-		valueLabel.Text = tostring(v)
-	end
-	visual(defaultV)
-
-	local dragging = false
-	local function fromInput(input)
-		local alpha = math.clamp(
-			(input.Position.X - hit.AbsolutePosition.X) / hit.AbsoluteSize.X, 0, 1
-		)
-		local v = math.clamp(math.round(minV + alpha * (maxV - minV)), minV, maxV)
-		visual(v)
-		onChange(v)
-	end
-
-	hit.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
-			toolsPage.ScrollingEnabled = false
-			fromInput(input)
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			fromInput(input)
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			dragging = false
-			toolsPage.ScrollingEnabled = true
-		end
-	end)
-end
-
-local noclipBtn, flyBtn, clickTpBtn
-
--- NOCLIP -----------------------------------------------------------
-toolsHeading("Noclip")
-
 local noclipOn = false
 local noclipConn
-local noclipTouched = setmetatable({}, {__mode = "k"}) -- parts we turned non-solid
+local noclipTouched = setmetatable({}, {__mode = "k"})
 
 local function setNoclip(state)
 	if state == noclipOn then return end
@@ -1513,15 +1058,9 @@ local function setNoclip(state)
 	setStatus(state and "Noclip on" or "Noclip off", state and C.ok or C.muted)
 end
 
-noclipBtn = makeButton(toolsPage, "NOCLIP: OFF", "ghost", 13)
-noclipBtn.Name = "NoclipButton"
-noclipBtn.Size = UDim2.new(1, -8, 0, 36)
-noclipBtn.LayoutOrder = nextToolsOrder()
-noclipBtn.MouseButton1Click:Connect(function() setNoclip(not noclipOn) end)
-
--- FLY --------------------------------------------------------------
-toolsHeading("Fly")
-
+--------------------------------------------------------------------
+-- Fly
+--------------------------------------------------------------------
 local flyOn = false
 local flySpeed = 60
 local flyConn, flyBV, flyBG
@@ -1571,7 +1110,6 @@ local function startFly()
 			return
 		end
 
-		-- While freecam is on, the camera is detached, so hold still
 		if freecamOn then
 			flyBV.Velocity = Vector3.zero
 			return
@@ -1606,26 +1144,13 @@ local function toggleFly()
 	if flyOn then stopFly() else startFly() end
 end
 
--- Flying stops when you respawn (the old body movers are gone with the character)
 player.CharacterAdded:Connect(function()
 	if flyOn then stopFly(true) end
 end)
 
-flyBtn = makeButton(toolsPage, "FLY: OFF", "ghost", 13)
-flyBtn.Name = "FlyButton"
-flyBtn.Size = UDim2.new(1, -8, 0, 36)
-flyBtn.LayoutOrder = nextToolsOrder()
-flyBtn.MouseButton1Click:Connect(toggleFly)
-
-toolsHint("WASD to move in the direction you look, Space / E up, Ctrl / Q down.", 30)
-
-makeSlider("Fly speed", 10, 300, flySpeed, function(v)
-	flySpeed = v
-end)
-
--- CLICK TELEPORT ---------------------------------------------------
-toolsHeading("Click teleport")
-
+--------------------------------------------------------------------
+-- Click teleport
+--------------------------------------------------------------------
 local clickTpOn = false
 
 local function setClickTp(state)
@@ -1637,19 +1162,11 @@ local function setClickTp(state)
 	)
 end
 
-clickTpBtn = makeButton(toolsPage, "CLICK TP: OFF", "ghost", 13)
-clickTpBtn.Name = "ClickTpButton"
-clickTpBtn.Size = UDim2.new(1, -8, 0, 36)
-clickTpBtn.LayoutOrder = nextToolsOrder()
-clickTpBtn.MouseButton1Click:Connect(function() setClickTp(not clickTpOn) end)
-
-toolsHint("When on, left click anywhere in the world to teleport there. When off, left click does nothing special.", 44)
-
 local clickRayParams = RaycastParams.new()
 clickRayParams.FilterType = Enum.RaycastFilterType.Exclude
 
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed or not clickTpOn then return end -- clicks on the GUI are ignored
+	if processed or not clickTpOn then return end
 	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
 
 	local cam  = workspace.CurrentCamera
@@ -1671,464 +1188,998 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 --------------------------------------------------------------------
--- Page: VC (supported Voice Chat information)
+-- Voice chat (your original code; the duplicated copy was removed)
 --------------------------------------------------------------------
-local vcPage = Instance.new("ScrollingFrame")
-vcPage.Name = "VCPage"
-vcPage.BackgroundTransparency = 1
-vcPage.BorderSizePixel = 0
-vcPage.Position = PAGE_POS
-vcPage.Size = PAGE_SIZE
-vcPage.Visible = false
-vcPage.ScrollBarThickness = 3
-vcPage.ScrollBarImageColor3 = C.accent
-vcPage.ScrollingDirection = Enum.ScrollingDirection.Y
-vcPage.CanvasSize = UDim2.new()
-vcPage.AutomaticCanvasSize = Enum.AutomaticSize.Y
-vcPage.Parent = content
-
-local vcLayout = Instance.new("UIListLayout")
-vcLayout.Padding = UDim.new(0, 8)
-vcLayout.SortOrder = Enum.SortOrder.LayoutOrder
-vcLayout.Parent = vcPage
-
-local vcPad = Instance.new("UIPadding")
-vcPad.PaddingBottom = UDim.new(0, 10)
-vcPad.Parent = vcPage
-
-local vcOrder = 0
-local function nextVCOrder()
-    vcOrder += 1
-    return vcOrder
-end
-
-label(vcPage, {
-    Text = "VOICE CHAT",
-    Font = Enum.Font.GothamBold,
-    TextSize = 13,
-    TextColor3 = C.text,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    Size = UDim2.new(1, -8, 0, 22),
-    LayoutOrder = nextVCOrder(),
-})
-
-label(vcPage, {
-    Text = "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.",
-    Font = Enum.Font.Gotham,
-    TextSize = 11,
-    TextColor3 = C.muted,
-    TextWrapped = true,
-    TextXAlignment = Enum.TextXAlignment.Left,
-    TextYAlignment = Enum.TextYAlignment.Top,
-    Size = UDim2.new(1, -8, 0, 48),
-    LayoutOrder = nextVCOrder(),
-})
-
-local vcInfoBtn = makeButton(vcPage, "BYPASS VOICE CHAT", "ghost", 12)
-vcInfoBtn.Name = "VoiceChatInfoButton"
-vcInfoBtn.Size = UDim2.new(1, -8, 0, 36)
-vcInfoBtn.LayoutOrder = nextVCOrder()
-vcInfoBtn.MouseButton1Click:Connect(function()
+local function runVoiceChat()
 	local cloneref = cloneref or function(instance)
-    return instance
+		return instance
+	end
+
+	local function safeGetService(name)
+		local ok, service = pcall(function()
+			return game:GetService(name)
+		end)
+		return ok and service or nil
+	end
+
+	local voiceChatInternal = safeGetService("VoiceChatInternal")
+	local coreGui = safeGetService("CoreGui")
+	local players = safeGetService("Players")
+	local localPlayer = players and players.LocalPlayer
+
+	local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+	local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+
+	local buttonSize = 35
+	local offsetX = 54
+	local offsetY = 6
+
+	local function isMuted()
+		if not voiceChatInternal then
+			return false
+		end
+
+		local ok, paused = pcall(function()
+			return voiceChatInternal:IsPublishPaused()
+		end)
+
+		return ok and paused == true or false
+	end
+
+	local function setMuted(state)
+		if not voiceChatInternal then
+			warn("VoiceChatInternal is unavailable in this environment.")
+			return
+		end
+
+		local ok, err = pcall(function()
+			voiceChatInternal:PublishPause(state)
+		end)
+
+		if not ok then
+			warn("Could not change voice-chat mute state: " .. tostring(err))
+		end
+	end
+
+	local function getGuiParent()
+		if coreGui then
+			return cloneref(coreGui)
+		end
+
+		local pg = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
+		return pg
+	end
+
+	local function hideExistingVoiceIcons()
+		local parent = getGuiParent()
+		if not parent then
+			return
+		end
+
+		local voiceGui = parent:FindFirstChild("VoiceChat")
+		if not voiceGui then
+			return
+		end
+
+		for _, descendant in ipairs(voiceGui:GetDescendants()) do
+			if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
+				descendant.ImageTransparency = 1
+			elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
+				descendant.TextTransparency = 1
+			end
+		end
+	end
+
+	local function refresh(icon)
+		if not icon or not icon.Parent then
+			return
+		end
+
+		icon.Image = isMuted() and mutedImage or talkingImage
+	end
+
+	local function createGui()
+		local parent = getGuiParent()
+		if not parent then
+			warn("Could not find a GUI parent for the voice-chat button.")
+			return
+		end
+
+		local previous = parent:FindFirstChild("CustomVoiceController")
+		if previous then
+			previous:Destroy()
+		end
+
+		local screenGui = Instance.new("ScreenGui")
+		screenGui.Name = "CustomVoiceController"
+		screenGui.ResetOnSpawn = false
+		screenGui.IgnoreGuiInset = true
+		screenGui.DisplayOrder = 999999
+		screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		screenGui.Parent = parent
+
+		local hitArea = Instance.new("TextButton")
+		hitArea.Name = "MicHitArea"
+		hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
+		hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
+		hitArea.BackgroundTransparency = 1
+		hitArea.Text = ""
+		hitArea.Active = true
+		hitArea.ZIndex = 10000
+		hitArea.Parent = screenGui
+
+		local icon = Instance.new("ImageLabel")
+		icon.Name = "MicIcon"
+		icon.Size = UDim2.fromScale(1, 1)
+		icon.Position = UDim2.fromOffset(0, 0)
+		icon.BackgroundTransparency = 1
+		icon.Image = mutedImage
+		icon.ScaleType = Enum.ScaleType.Fit
+		icon.ZIndex = 10001
+		icon.Parent = hitArea
+
+		hitArea.Activated:Connect(function()
+			setMuted(not isMuted())
+			refresh(icon)
+		end)
+
+		hideExistingVoiceIcons()
+		refresh(icon)
+
+		task.spawn(function()
+			while screenGui.Parent do
+				refresh(icon)
+				task.wait(0.25)
+			end
+		end)
+	end
+
+	createGui()
+
+	-- icon mute
+	local d = cloneref
+
+	local g = d(game:GetService("VoiceChatService"))
+	local h = d(game:GetService("VoiceChatInternal"))
+	local j = d(game:GetService("CoreGui"))
+
+	local m = getconnections
+	local o = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
+
+	local q, r, s
+
+	local function u()
+		q = nil
+		r = nil
+		s = nil
+
+		for _, v in ipairs(j:GetDescendants()) do
+			if v.Name == "toggle_mic_mute" then
+				q = v
+				break
+			end
+		end
+
+		if q then
+			r = q:FindFirstChild("IntegrationIconFrame", true)
+
+			if r then
+				s = r:FindFirstChild("IntegrationIcon", true)
+			end
+		end
+	end
+
+	u()
+
+	if not q then
+		task.spawn(function()
+			g:joinVoice()
+		end)
+
+		task.wait(1.5)
+		u()
+	end
+
+	local function v()
+		if s and s:FindFirstChild("1") then
+			return s["1"].Image
+		end
+
+		return nil
+	end
+
+	local w = false
+
+	while not w do
+		local x = v()
+
+		if x and x ~= o and x ~= "" then
+			w = true
+		end
+
+		if not w then
+			task.wait(0.5)
+		end
+	end
+
+	task.wait(1)
+
+	task.spawn(function()
+		g:leaveVoice()
+	end)
+
+	task.wait(2)
+
+	if m then
+		task.spawn(function()
+			local y = m(h.StateChanged)
+
+			for z, aa in ipairs(y) do
+				if z >= 7 and aa then
+					aa:Disable()
+				end
+			end
+		end)
+	end
+
+	task.wait(2)
+
+	task.spawn(function()
+		g:joinVoice()
+	end)
+
+	task.wait(1)
+	u()
+
+	-- FIX: this used to call undefined globals (ah / ai)
+	_G.vcbSetMuted = function(muted)
+		setMuted(muted)
+	end
 end
 
-local function safeGetService(name)
-    local ok, service = pcall(function()
-        return game:GetService(name)
-    end)
-    return ok and service or nil
+--------------------------------------------------------------------
+-- Card building blocks
+--------------------------------------------------------------------
+local function makeColumn(page, side)
+	local col = Instance.new("ScrollingFrame")
+	col.Name = side .. "Column"
+	col.BackgroundTransparency = 1
+	col.BorderSizePixel = 0
+	col.ScrollBarThickness = 3
+	col.ScrollBarImageColor3 = C.faint
+	col.ScrollingDirection = Enum.ScrollingDirection.Y
+	col.CanvasSize = UDim2.new()
+	col.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	col.Size = UDim2.new(0.5, -7, 1, 0)
+	col.Position = (side == "left") and UDim2.new(0, 0, 0, 0) or UDim2.new(0.5, 7, 0, 0)
+	col.Parent = page
+
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 10)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = col
+	return col
 end
 
-local voiceChatInternal = safeGetService("VoiceChatInternal")
-local coreGui = safeGetService("CoreGui")
-local players = safeGetService("Players")
-local localPlayer = players and players.LocalPlayer
-
-local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
-local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
-
-local buttonSize = 35
-local offsetX = 54
-local offsetY = 6
-
-local function isMuted()
-    if not voiceChatInternal then
-        return false
-    end
-
-    local ok, paused = pcall(function()
-        return voiceChatInternal:IsPublishPaused()
-    end)
-
-    return ok and paused == true or false
+-- (i) icon used in every card header
+local function infoIcon(parent, pos)
+	local icon = Instance.new("Frame")
+	icon.BackgroundTransparency = 1
+	icon.Position = pos
+	icon.Size = UDim2.fromOffset(16, 16)
+	icon.Parent = parent
+	corner(icon, 8)
+	stroke(icon, C.muted, 1, 0)
+	label(icon, {
+		Text = "i",
+		Font = Enum.Font.GothamBold,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		Size = UDim2.fromScale(1, 1),
+	})
+	return icon
 end
 
-local function setMuted(state)
-    if not voiceChatInternal then
-        warn("VoiceChatInternal is unavailable in this environment.")
-        return
-    end
+-- Card with an (i) icon + title and a thin divider under the header.
+-- Returns the card and its header row.
+local function makeCard(parent, title)
+	local card = Instance.new("Frame")
+	card.Name = "Card"
+	card.Size = UDim2.new(1, -8, 0, 0)
+	card.AutomaticSize = Enum.AutomaticSize.Y
+	card.BackgroundColor3 = C.card
+	card.BorderSizePixel = 0
+	card.LayoutOrder = nextOrder(parent)
+	card.Parent = parent
+	corner(card, 9)
+	stroke(card, C.cardStroke, 1, 0)
 
-    local ok, err = pcall(function()
-        voiceChatInternal:PublishPause(state)
-    end)
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 12)
+	pad.PaddingBottom = UDim.new(0, 12)
+	pad.PaddingLeft = UDim.new(0, 12)
+	pad.PaddingRight = UDim.new(0, 12)
+	pad.Parent = card
 
-    if not ok then
-        warn("Could not change voice-chat mute state: " .. tostring(err))
-    end
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = card
+
+	local head = Instance.new("Frame")
+	head.Name = "Head"
+	head.BackgroundTransparency = 1
+	head.Size = UDim2.new(1, 0, 0, 26)
+	head.LayoutOrder = -2
+	head.Parent = card
+
+	infoIcon(head, UDim2.new(0, 0, 0.5, -8))
+
+	label(head, {
+		Text = title,
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(26, 0),
+		Size = UDim2.new(1, -26, 1, 0),
+	})
+
+	local divider = Instance.new("Frame")
+	divider.Name = "Divider"
+	divider.Size = UDim2.new(1, 0, 0, 1)
+	divider.BackgroundColor3 = C.cardStroke
+	divider.BorderSizePixel = 0
+	divider.LayoutOrder = -1
+	divider.Parent = card
+
+	return card, head
 end
 
-local function getGuiParent()
-
-    if coreGui then
-        return cloneref(coreGui)
-    end
-
-    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
-    return playerGui
+-- Small muted wrapped text inside a card
+local function addHint(card, text)
+	return label(card, {
+		Text = text,
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = nextOrder(card),
+	})
 end
 
-local function hideExistingVoiceIcons()
-    local parent = getGuiParent()
-    if not parent then
-        return
-    end
-
-    local voiceGui = parent:FindFirstChild("VoiceChat")
-    if not voiceGui then
-        return
-    end
-
-    for _, descendant in ipairs(voiceGui:GetDescendants()) do
-        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
-            descendant.ImageTransparency = 1
-        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
-            descendant.TextTransparency = 1
-        end
-    end
+-- OFF / ON switch on the right side of a card header
+local function addSwitch(head, key, onChange)
+	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.gold})
+	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
+	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+	seg.onSelect = function(idx)
+		onChange(idx == 2)
+		if updateUI then updateUI() end
+	end
+	switches[key] = seg
+	return seg
 end
 
-local function refresh(icon)
-    if not icon or not icon.Parent then
-        return
-    end
+-- Boxed, editable value (like the "45 %" box in the reference)
+local function makeValueBox(parent, text, unit)
+	local box = Instance.new("TextBox")
+	box.Name = "ValueBox"
+	box.AnchorPoint = Vector2.new(1, 0.5)
+	box.Position = UDim2.new(1, 0, 0.5, 0)
+	box.Size = UDim2.fromOffset(78, 26)
+	box.BackgroundColor3 = C.field
+	box.BorderSizePixel = 0
+	box.Text = text
+	box.ClearTextOnFocus = true
+	box.Font = Enum.Font.GothamBold
+	box.TextSize = 13
+	box.TextColor3 = C.text
+	box.TextXAlignment = Enum.TextXAlignment.Center
+	box.Parent = parent
+	corner(box, 7)
+	local bs = stroke(box, C.cardStroke, 1, 0)
 
-    icon.Image = isMuted() and mutedImage or talkingImage
+	local pad = Instance.new("UIPadding")
+	pad.PaddingRight = UDim.new(0, 26)
+	pad.Parent = box
+
+	label(box, {
+		Text = unit or "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 10,
+		TextColor3 = C.muted,
+		Position = UDim2.new(1, -28, 0, 0),
+		Size = UDim2.fromOffset(24, 26),
+	})
+
+	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.gold}) end)
+	box.FocusLost:Connect(function() tween(bs, 0.2, {Color = C.cardStroke}) end)
+	return box
 end
 
-local function createGui()
-    local parent = getGuiParent()
-    if not parent then
-        warn("Could not find a GUI parent for the voice-chat button.")
-        return
-    end
+-- Slider (gold fill). valueLabel may be a TextLabel or an editable TextBox.
+local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onChange, onDone)
+	local api = {}
+	local cur = startV
 
-    local previous = parent:FindFirstChild("CustomVoiceController")
-    if previous then
-        previous:Destroy()
-    end
+	local hit = Instance.new("TextButton")
+	hit.Text = ""
+	hit.AutoButtonColor = false
+	hit.BackgroundTransparency = 1
+	hit.Size = UDim2.new(1, 0, 0, 26)
+	hit.LayoutOrder = nextOrder(parent)
+	hit.Parent = parent
 
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "CustomVoiceController"
-    screenGui.ResetOnSpawn = false
-    screenGui.IgnoreGuiInset = true
-    screenGui.DisplayOrder = 999999
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.Parent = parent
+	local track = Instance.new("Frame")
+	track.Position = UDim2.new(0, 0, 0.5, -3)
+	track.Size = UDim2.new(1, 0, 0, 6)
+	track.BackgroundColor3 = C.field
+	track.BorderSizePixel = 0
+	track.Parent = hit
+	corner(track, 3)
+	stroke(track, C.cardStroke, 1, 0)
 
-    local hitArea = Instance.new("TextButton")
-    hitArea.Name = "MicHitArea"
-    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
-    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
-    hitArea.BackgroundTransparency = 1
-    hitArea.Text = ""
-    hitArea.Active = true
-    hitArea.ZIndex = 10000
-    hitArea.Parent = screenGui
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = C.gold
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	corner(fill, 3)
 
-    local icon = Instance.new("ImageLabel")
-    icon.Name = "MicIcon"
-    icon.Size = UDim2.fromScale(1, 1)
-    icon.Position = UDim2.fromOffset(0, 0)
-    icon.BackgroundTransparency = 1
-    icon.Image = mutedImage
-    icon.ScaleType = Enum.ScaleType.Fit
-    icon.ZIndex = 10001
-    icon.Parent = hitArea
+	local knob = Instance.new("Frame")
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Size = UDim2.fromOffset(14, 14)
+	knob.Position = UDim2.fromScale(0, 0.5)
+	knob.BackgroundColor3 = C.text
+	knob.BorderSizePixel = 0
+	knob.ZIndex = 2
+	knob.Parent = track
+	corner(knob, 7)
 
-    hitArea.Activated:Connect(function()
-        setMuted(not isMuted())
-        refresh(icon)
-    end)
+	local function visual(v)
+		cur = v
+		local alpha = (v - minV) / (maxV - minV)
+		fill.Size = UDim2.fromScale(alpha, 1)
+		knob.Position = UDim2.fromScale(alpha, 0.5)
+		if valueLabel then valueLabel.Text = tostring(v) end
+	end
+	visual(startV)
+	api.set = visual
 
-    hideExistingVoiceIcons()
-    refresh(icon)
+	-- typing a number into the value box
+	if valueLabel and valueLabel:IsA("TextBox") then
+		valueLabel.FocusLost:Connect(function()
+			local n = tonumber(valueLabel.Text)
+			if n then
+				local v = math.clamp(math.round(n), minV, maxV)
+				visual(v)
+				onChange(v)
+				if onDone then onDone() end
+			else
+				visual(cur)
+			end
+		end)
+	end
 
-    -- Keep the icon in sync if the state changes elsewhere.
-    task.spawn(function()
-        while screenGui.Parent do
-            refresh(icon)
-            task.wait(0.25)
-        end
-    end)
+	local dragging = false
+	local function fromInput(input)
+		local alpha = math.clamp(
+			(input.Position.X - hit.AbsolutePosition.X) / hit.AbsoluteSize.X, 0, 1
+		)
+		local v = math.clamp(math.round(minV + alpha * (maxV - minV)), minV, maxV)
+		visual(v)
+		onChange(v)
+	end
+
+	hit.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			scroller.ScrollingEnabled = false
+			fromInput(input)
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			fromInput(input)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			dragging = false
+			scroller.ScrollingEnabled = true
+			if onDone then onDone() end
+		end
+	end)
+
+	return api
 end
 
-createGui()
-local cloneref = cloneref or function(instance)
-    return instance
+--------------------------------------------------------------------
+-- Pages
+--------------------------------------------------------------------
+local PAGE_POS  = UDim2.fromOffset(14, 12)
+local PAGE_SIZE = UDim2.new(1, -28, 1, -24)
+
+local function newPage(visible)
+	local p = Instance.new("Frame")
+	p.BackgroundTransparency = 1
+	p.Position = PAGE_POS
+	p.Size = PAGE_SIZE
+	p.Visible = visible and true or false
+	p.Parent = content
+	return p
 end
 
-local function safeGetService(name)
-    local ok, service = pcall(function()
-        return game:GetService(name)
-    end)
-    return ok and service or nil
+local normalPage  = newPage(true)
+local friendsPage = newPage(false)
+local allPage     = newPage(false)
+local toolsPage   = newPage(false)
+local vcPage      = newPage(false)
+
+-- Page: Teleport (input + player card) -------------------------------
+do
+	local left  = makeColumn(normalPage, "left")
+	local right = makeColumn(normalPage, "right")
+
+	local pcard = makeCard(left, "Player")
+
+	label(pcard, {
+		Text = "Username or display name",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 16),
+		LayoutOrder = nextOrder(pcard),
+	})
+
+	inputBox = Instance.new("TextBox")
+	inputBox.Name = "UsernameInput"
+	inputBox.Size = UDim2.new(1, 0, 0, 38)
+	inputBox.BackgroundColor3 = C.field
+	inputBox.BorderSizePixel = 0
+	inputBox.PlaceholderText = "e.g. Roblox"
+	inputBox.PlaceholderColor3 = C.faint
+	inputBox.Text = ""
+	inputBox.ClearTextOnFocus = false
+	inputBox.Font = Enum.Font.GothamMedium
+	inputBox.TextSize = 14
+	inputBox.TextColor3 = C.text
+	inputBox.TextXAlignment = Enum.TextXAlignment.Left
+	inputBox.LayoutOrder = nextOrder(pcard)
+	inputBox.Parent = pcard
+	corner(inputBox, 8)
+	local inputPad = Instance.new("UIPadding")
+	inputPad.PaddingLeft = UDim.new(0, 12)
+	inputPad.Parent = inputBox
+	local inputStroke = stroke(inputBox, C.cardStroke, 1, 0)
+
+	inputBox.Focused:Connect(function()
+		tween(inputStroke, 0.2, {Color = C.gold})
+	end)
+	inputBox.FocusLost:Connect(function()
+		tween(inputStroke, 0.2, {Color = C.cardStroke})
+	end)
+
+	addHint(pcard, "Type a name and the player card appears on the right. Press Enter to teleport to the match.")
+
+	-- Target card (pops out when the typed name matches someone) ----
+	local tcard = makeCard(right, "Target")
+
+	local emptyBox = Instance.new("Frame")
+	emptyBox.Size = UDim2.new(1, 0, 0, 86)
+	emptyBox.BackgroundColor3 = C.field
+	emptyBox.BorderSizePixel = 0
+	emptyBox.LayoutOrder = nextOrder(tcard)
+	emptyBox.Parent = tcard
+	corner(emptyBox, 8)
+	stroke(emptyBox, C.cardStroke, 1, 0.3)
+	label(emptyBox, {
+		Text = "No player selected yet.",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.faint,
+		Size = UDim2.fromScale(1, 1),
+	})
+
+	local info = Instance.new("Frame")
+	info.Name = "PlayerCard"
+	info.BackgroundTransparency = 1
+	info.Size = UDim2.new(1, 0, 0, 90)
+	info.Visible = false
+	info.LayoutOrder = nextOrder(tcard)
+	info.Parent = tcard
+
+	local cardScale = Instance.new("UIScale")
+	cardScale.Parent = info
+
+	local cardName = label(info, {
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(0, 0),
+		Size = UDim2.new(1, 0, 0, 20),
+	})
+	local cardSub = label(info, {
+		Text = "",
+		Font = Enum.Font.Gotham,
+		TextSize = 12,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(0, 22),
+		Size = UDim2.new(1, 0, 0, 16),
+	})
+
+	local CARD_BTN_SIZE = UDim2.new(1 / 3, -4, 0, 34)
+
+	tpBtn = makeButton(info, "TELEPORT", "primary", 10)
+	tpBtn.Name = "TeleportButton"
+	tpBtn.Position = UDim2.new(0, 0, 0, 52)
+	tpBtn.Size = CARD_BTN_SIZE
+
+	cardSpecBtn = makeButton(info, "SPECTATE", "ghost", 10)
+	cardSpecBtn.Name = "SpectateButton"
+	cardSpecBtn.Position = UDim2.new(1 / 3, 2, 0, 52)
+	cardSpecBtn.Size = CARD_BTN_SIZE
+
+	cardEspBtn = makeButton(info, "ESP", "ghost", 10)
+	cardEspBtn.Name = "EspButton"
+	cardEspBtn.Position = UDim2.new(2 / 3, 4, 0, 52)
+	cardEspBtn.Size = CARD_BTN_SIZE
+
+	local function setCard(match)
+		local changed = (match ~= currentMatch)
+		currentMatch = match
+
+		if match then
+			cardName.Text = match.DisplayName
+			cardSub.Text = "@" .. match.Name .. (friendCache[match.UserId] and "  •  friend" or "")
+			emptyBox.Visible = false
+			if changed or not info.Visible then
+				info.Visible = true
+				cardScale.Scale = 0.9
+				tween(cardScale, 0.3, {Scale = 1}, Enum.EasingStyle.Back)
+			end
+		else
+			info.Visible = false
+			emptyBox.Visible = true
+		end
+		if updateUI then updateUI() end
+	end
+
+	inputBox:GetPropertyChangedSignal("Text"):Connect(function()
+		if inputBox.Text == "" then
+			setCard(nil)
+			setStatus("Ready", C.muted)
+			return
+		end
+		local match = findPlayer(inputBox.Text)
+		setCard(match)
+		if match then
+			setStatus(("Match: %s (@%s)"):format(match.DisplayName, match.Name), C.ok)
+		else
+			setStatus("No matching player", C.muted)
+		end
+	end)
+
+	Players.PlayerRemoving:Connect(function()
+		task.defer(function()
+			if inputBox.Text ~= "" then setCard(findPlayer(inputBox.Text)) end
+		end)
+	end)
+
+	tpBtn.MouseButton1Click:Connect(function()
+		if currentMatch then teleportTo(currentMatch) end
+	end)
+	cardSpecBtn.MouseButton1Click:Connect(function()
+		if not currentMatch then
+			setStatus("Player not found", C.err)
+		elseif spectating == currentMatch then
+			stopSpectating()
+		else
+			startSpectating(currentMatch)
+		end
+	end)
+	cardEspBtn.MouseButton1Click:Connect(function()
+		toggleEsp(currentMatch)
+	end)
+	inputBox.FocusLost:Connect(function(enterPressed)
+		if enterPressed then
+			local target = currentMatch or findPlayer(inputBox.Text)
+			if target then teleportTo(target) else setStatus("Player not found", C.err) end
+		end
+	end)
 end
 
-local voiceChatInternal = safeGetService("VoiceChatInternal")
-local coreGui = safeGetService("CoreGui")
-local players = safeGetService("Players")
-local localPlayer = players and players.LocalPlayer
+-- Page: Friends --------------------------------------------------------
+local friendsHeader, friendList, emptyLabel
+local makeFriendRow
 
-local mutedImage = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
-local talkingImage = "rbxasset://textures/ui/VoiceChat/MicLight/Talking0.png"
+do
+	local fcard = Instance.new("Frame")
+	fcard.Name = "FriendsCard"
+	fcard.Size = UDim2.fromScale(1, 1)
+	fcard.BackgroundColor3 = C.card
+	fcard.BorderSizePixel = 0
+	fcard.Parent = friendsPage
+	corner(fcard, 9)
+	stroke(fcard, C.cardStroke, 1, 0)
 
-local buttonSize = 35
-local offsetX = 54
-local offsetY = 6
+	infoIcon(fcard, UDim2.fromOffset(12, 17))
 
-local function isMuted()
-    if not voiceChatInternal then
-        return false
-    end
+	friendsHeader = label(fcard, {
+		Text = "Friends in this server",
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(38, 12),
+		Size = UDim2.new(1, -50, 0, 26),
+	})
 
-    local ok, paused = pcall(function()
-        return voiceChatInternal:IsPublishPaused()
-    end)
+	local div = Instance.new("Frame")
+	div.Position = UDim2.fromOffset(12, 44)
+	div.Size = UDim2.new(1, -24, 0, 1)
+	div.BackgroundColor3 = C.cardStroke
+	div.BorderSizePixel = 0
+	div.Parent = fcard
 
-    return ok and paused == true or false
+	friendList = Instance.new("ScrollingFrame")
+	friendList.Name = "FriendList"
+	friendList.Position = UDim2.fromOffset(12, 54)
+	friendList.Size = UDim2.new(1, -24, 1, -66)
+	friendList.BackgroundTransparency = 1
+	friendList.BorderSizePixel = 0
+	friendList.ScrollBarThickness = 3
+	friendList.ScrollBarImageColor3 = C.faint
+	friendList.CanvasSize = UDim2.new()
+	friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	friendList.Parent = fcard
+
+	local listLayout = Instance.new("UIListLayout")
+	listLayout.Padding = UDim.new(0, 6)
+	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	listLayout.Parent = friendList
+
+	emptyLabel = label(fcard, {
+		Text = "No friends in this server",
+		Font = Enum.Font.Gotham,
+		TextSize = 13,
+		TextColor3 = C.faint,
+		Position = UDim2.fromOffset(0, 96),
+		Size = UDim2.new(1, 0, 0, 30),
+		Visible = false,
+	})
+
+	makeFriendRow = function(p, order)
+		local row = Instance.new("Frame")
+		row.Name = "Friend_" .. p.UserId
+		row.Size = UDim2.new(1, -8, 0, 46)
+		row.BackgroundColor3 = C.field
+		row.BackgroundTransparency = 1
+		row.BorderSizePixel = 0
+		row.LayoutOrder = order
+		row.Parent = friendList
+		corner(row, 8)
+		local rowStroke = stroke(row, C.cardStroke, 1, 1)
+
+		label(row, {
+			Text = p.DisplayName,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(12, 5),
+			Size = UDim2.new(1, -230, 0, 20),
+		})
+		label(row, {
+			Text = "@" .. p.Name,
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(12, 24),
+			Size = UDim2.new(1, -230, 0, 16),
+		})
+
+		-- right to left: ESP | SPECTATE | TP
+		local espBtn = makeButton(row, "ESP", "ghost", 10)
+		espBtn.Size = UDim2.fromOffset(52, 28)
+		espBtn.Position = UDim2.new(1, -62, 0.5, -14)
+
+		local specBtn = makeButton(row, "SPECTATE", "ghost", 10)
+		specBtn.Size = UDim2.fromOffset(84, 28)
+		specBtn.Position = UDim2.new(1, -152, 0.5, -14)
+
+		local tp = makeButton(row, "TP", "primary", 11)
+		tp.Size = UDim2.fromOffset(44, 28)
+		tp.Position = UDim2.new(1, -202, 0.5, -14)
+
+		tp.MouseButton1Click:Connect(function() teleportTo(p) end)
+		specBtn.MouseButton1Click:Connect(function()
+			if spectating == p then stopSpectating() else startSpectating(p) end
+		end)
+		espBtn.MouseButton1Click:Connect(function() toggleEsp(p) end)
+
+		rowSpecButtons[p.UserId] = specBtn
+		rowEspButtons[p.UserId]  = espBtn
+		tween(row, 0.3, {BackgroundTransparency = 0})
+		tween(rowStroke, 0.3, {Transparency = 0})
+	end
 end
 
-local function setMuted(state)
-    if not voiceChatInternal then
-        warn("VoiceChatInternal is unavailable in this environment.")
-        return
-    end
+-- Page: Misc -------------------------------------------------------------
+do
+	local left  = makeColumn(allPage, "left")
+	local right = makeColumn(allPage, "right")
 
-    local ok, err = pcall(function()
-        voiceChatInternal:PublishPause(state)
-    end)
+	-- ESP everyone
+	do
+		local card, head = makeCard(left, "ESP everyone")
+		addSwitch(head, "espAll", function(on)
+			if on ~= espAll then setEspAll(on) end
+		end)
+		addHint(card, "Chams on every player in the server.")
+	end
 
-    if not ok then
-        warn("Could not change voice-chat mute state: " .. tostring(err))
-    end
+	-- ESP names
+	do
+		local card, head = makeCard(left, "ESP names")
+		addSwitch(head, "espNames", function(on)
+			if on ~= espNames then setEspNames(on) end
+		end)
+		addHint(card, "Name tags above ESP'd players.")
+	end
+
+	-- ESP status + clear
+	do
+		local card = makeCard(left, "ESP status")
+		allInfo = label(card, {
+			Text = "ESP active on 0 players",
+			Font = Enum.Font.GothamMedium,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, 0, 0, 20),
+			LayoutOrder = nextOrder(card),
+		})
+		addHint(card, "ESP keeps running when you close this window.")
+		local clearBtn = makeButton(card, "CLEAR ALL ESP", "ghost", 12)
+		clearBtn.Size = UDim2.new(1, 0, 0, 34)
+		clearBtn.LayoutOrder = nextOrder(card)
+		clearBtn.MouseButton1Click:Connect(clearAllEsp)
+	end
+
+	-- Freecam
+	do
+		local card, head = makeCard(right, "Freecam")
+		addSwitch(head, "freecam", function(on)
+			if on ~= freecamOn then toggleFreecam() end
+		end)
+		addHint(card, "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Key: P")
+	end
+
+	-- Anti-AFK
+	do
+		local card, head = makeCard(right, "Anti-AFK")
+		addSwitch(head, "antiAfk", function(on)
+			if on ~= antiAfkOn then setAntiAfk(on) end
+		end)
+		addHint(card, "Stops you from being kicked for idling.")
+	end
+
+	-- Walk speed
+	do
+		local card, head = makeCard(right, "Walk speed")
+		local speedBox = makeValueBox(head, tostring(SPEED_DEFAULT), "st/s")
+		local slider = makeSlider(card, right, SPEED_MIN, SPEED_MAX, SPEED_DEFAULT, speedBox,
+			function(v) setSpeed(v) end,
+			function() setStatus("Walk speed: " .. tostring(customSpeed), C.ok) end
+		)
+		local resetBtn = makeButton(card, "RESET WALK SPEED", "ghost", 12)
+		resetBtn.Name = "ResetSpeedButton"
+		resetBtn.Size = UDim2.new(1, 0, 0, 34)
+		resetBtn.LayoutOrder = nextOrder(card)
+		resetBtn.MouseButton1Click:Connect(function()
+			customSpeed = nil
+			slider.set(SPEED_DEFAULT)
+			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			if hum then hum.WalkSpeed = SPEED_DEFAULT end
+			setStatus("Walk speed reset", C.muted)
+		end)
+	end
+
+	setAntiAfk(true) -- on by default
 end
 
-local function getGuiParent()
+-- Page: Tools --------------------------------------------------------------
+do
+	local left  = makeColumn(toolsPage, "left")
+	local right = makeColumn(toolsPage, "right")
 
-    if coreGui then
-        return cloneref(coreGui)
-    end
+	-- Noclip
+	do
+		local card, head = makeCard(left, "Noclip")
+		addSwitch(head, "noclip", function(on) setNoclip(on) end)
+		addHint(card, "Walk through walls.")
+	end
 
-    local playerGui = localPlayer and localPlayer:FindFirstChildOfClass("PlayerGui")
-    return playerGui
+	-- Click teleport
+	do
+		local card, head = makeCard(left, "Click teleport")
+		addSwitch(head, "clickTp", function(on) setClickTp(on) end)
+		addHint(card, "When on, left click anywhere in the world to teleport there. When off, left click does nothing special.")
+	end
+
+	-- Fly
+	do
+		local card, head = makeCard(right, "Fly")
+		addSwitch(head, "fly", function(on)
+			if on ~= flyOn then toggleFly() end
+		end)
+		addHint(card, "WASD to move in the direction you look, Space / E up, Ctrl / Q down.")
+
+		local speedRow = Instance.new("Frame")
+		speedRow.BackgroundTransparency = 1
+		speedRow.Size = UDim2.new(1, 0, 0, 26)
+		speedRow.LayoutOrder = nextOrder(card)
+		speedRow.Parent = card
+		label(speedRow, {
+			Text = "Fly speed",
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, -90, 1, 0),
+		})
+		local flyBox = makeValueBox(speedRow, tostring(flySpeed), "st/s")
+		makeSlider(card, right, 10, 300, flySpeed, flyBox, function(v)
+			flySpeed = v
+		end)
+	end
 end
 
-local function hideExistingVoiceIcons()
-    local parent = getGuiParent()
-    if not parent then
-        return
-    end
+-- Page: VC ------------------------------------------------------------------
+do
+	local left  = makeColumn(vcPage, "left")
+	makeColumn(vcPage, "right")
 
-    local voiceGui = parent:FindFirstChild("VoiceChat")
-    if not voiceGui then
-        return
-    end
+	local card = makeCard(left, "Voice chat")
+	addHint(card, "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.")
 
-    for _, descendant in ipairs(voiceGui:GetDescendants()) do
-        if descendant:IsA("ImageLabel") or descendant:IsA("ImageButton") then
-            descendant.ImageTransparency = 1
-        elseif descendant:IsA("TextLabel") or descendant:IsA("TextButton") then
-            descendant.TextTransparency = 1
-        end
-    end
+	local vcInfoBtn = makeButton(card, "BYPASS VOICE CHAT", "ghost", 12)
+	vcInfoBtn.Name = "VoiceChatInfoButton"
+	vcInfoBtn.Size = UDim2.new(1, 0, 0, 36)
+	vcInfoBtn.LayoutOrder = nextOrder(card)
+	vcInfoBtn.MouseButton1Click:Connect(function()
+		task.spawn(runVoiceChat)
+	end)
 end
-
-local function refresh(icon)
-    if not icon or not icon.Parent then
-        return
-    end
-
-    icon.Image = isMuted() and mutedImage or talkingImage
-end
-
-local function createGui()
-    local parent = getGuiParent()
-    if not parent then
-        warn("Could not find a GUI parent for the voice-chat button.")
-        return
-    end
-
-    local previous = parent:FindFirstChild("CustomVoiceController")
-    if previous then
-        previous:Destroy()
-    end
-
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "CustomVoiceController"
-    screenGui.ResetOnSpawn = false
-    screenGui.IgnoreGuiInset = true
-    screenGui.DisplayOrder = 999999
-    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    screenGui.Parent = parent
-
-    local hitArea = Instance.new("TextButton")
-    hitArea.Name = "MicHitArea"
-    hitArea.Size = UDim2.fromOffset(buttonSize, buttonSize)
-    hitArea.Position = UDim2.fromOffset(110 + offsetX, 10 + offsetY)
-    hitArea.BackgroundTransparency = 1
-    hitArea.Text = ""
-    hitArea.Active = true
-    hitArea.ZIndex = 10000
-    hitArea.Parent = screenGui
-
-    local icon = Instance.new("ImageLabel")
-    icon.Name = "MicIcon"
-    icon.Size = UDim2.fromScale(1, 1)
-    icon.Position = UDim2.fromOffset(0, 0)
-    icon.BackgroundTransparency = 1
-    icon.Image = mutedImage
-    icon.ScaleType = Enum.ScaleType.Fit
-    icon.ZIndex = 10001
-    icon.Parent = hitArea
-
-    hitArea.Activated:Connect(function()
-        setMuted(not isMuted())
-        refresh(icon)
-    end)
-
-    hideExistingVoiceIcons()
-    refresh(icon)
-
-    -- Keep the icon in sync if the state changes elsewhere.
-    task.spawn(function()
-        while screenGui.Parent do
-            refresh(icon)
-            task.wait(0.25)
-        end
-    end)
-end
-
-createGui()
--- icon mute
-
-    local d = cloneref or function(v)
-    return v
-end
-
-local g = d(game:GetService("VoiceChatService"))
-local h = d(game:GetService("VoiceChatInternal"))
-local j = d(game:GetService("CoreGui"))
-
-local m = getconnections
-local o = "rbxasset://textures/ui/VoiceChat/MicLight/Muted.png"
-
-local q, r, s
-
-local function u()
-    q = nil
-    r = nil
-    s = nil
-
-    for _, v in ipairs(j:GetDescendants()) do
-        if v.Name == "toggle_mic_mute" then
-            q = v
-            break
-        end
-    end
-
-    if q then
-        r = q:FindFirstChild("IntegrationIconFrame", true)
-
-        if r then
-            s = r:FindFirstChild("IntegrationIcon", true)
-        end
-    end
-end
-
-u()
-
-if not q then
-    task.spawn(function()
-        g:joinVoice()
-    end)
-
-    task.wait(1.5)
-    u()
-end
-
-local function v()
-    if s and s:FindFirstChild("1") then
-        return s["1"].Image
-    end
-
-    return nil
-end
-
-local w = false
-
-while not w do
-    local x = v()
-
-    if x and x ~= o and x ~= "" then
-        w = true
-    end
-
-    if not w then
-        task.wait(0.5)
-    end
-end
-
-task.wait(1)
-
-task.spawn(function()
-    g:leaveVoice()
-end)
-
-task.wait(2)
-
-if m then
-    task.spawn(function()
-        local y = m(h.StateChanged)
-
-        for z, aa in ipairs(y) do
-            if z >= 7 and aa then
-                aa:Disable()
-            end
-        end
-    end)
-end
-
-task.wait(2)
-
-task.spawn(function()
-    g:joinVoice()
-end)
-
-task.wait(1)
-u()
-
-_G.vcbSetMuted = function(muted)
-    ah = muted
-    ai(muted)
-end
-end)
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
 --------------------------------------------------------------------
 updateUI = function()
+	local function sw(key, state)
+		local s = switches[key]
+		if s then s.set(state and 2 or 1) end
+	end
+	sw("espAll", espAll)
+	sw("espNames", espNames)
+	sw("freecam", freecamOn)
+	sw("antiAfk", antiAfkOn)
+	sw("noclip", noclipOn)
+	sw("fly", flyOn)
+	sw("clickTp", clickTpOn)
+
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
 	setToggleStyle(cardSpecBtn, onCardSpec, "STOP", "SPECTATE")
@@ -2146,15 +2197,12 @@ updateUI = function()
 	end
 
 	-- Misc tab
-	setToggleStyle(allEspBtn, espAll, "ESP EVERYONE: ON", "ESP EVERYONE: OFF")
-	setToggleStyle(namesBtn, espNames, "NAMES: ON", "NAMES: OFF")
-	setToggleStyle(freecamBtn, freecamOn, "FREECAM: ON", "FREECAM: OFF")
 	if allInfo then
 		local n = countEsp()
 		allInfo.Text = ("ESP active on %d player%s"):format(n, n == 1 and "" or "s")
 	end
 
-	-- title bar summary
+	-- banner summary pill (hidden when nothing is active)
 	local parts = {}
 	if spectating then table.insert(parts, "watching " .. spectating.DisplayName) end
 	if freecamOn then table.insert(parts, "freecam") end
@@ -2164,7 +2212,9 @@ updateUI = function()
 		local n = countEsp()
 		if n > 0 then table.insert(parts, "ESP: " .. n) end
 	end
-	titleSub.Text = table.concat(parts, "  |  ")
+	local summary = table.concat(parts, "  |  ")
+	bannerSummary.Text = summary
+	bannerSummary.Visible = summary ~= ""
 end
 
 refreshFriends = function()
@@ -2184,7 +2234,6 @@ refreshFriends = function()
 
 	emptyLabel.Visible = (count == 0)
 	friendsHeader.Text = ("Friends in this server (%d)"):format(count)
-	friendsTab.Text = "Friends" -- the count is shown on the Friends page header
 	updateUI()
 end
 
@@ -2200,9 +2249,20 @@ refreshFriends()
 -- Tab switching
 --------------------------------------------------------------------
 local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5}
-local TAB_BUTTONS = {Normal = normalTab, Friends = friendsTab, All = allTab, Tools = toolsTab, VC = vcTab}
 local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage}
-local currentTab = "Normal"
+
+local function paintTabs(name)
+	for key, btn in pairs(TAB_BUTTONS) do
+		local active = (key == name)
+		tween(btn, 0.2, {
+			BackgroundTransparency = active and 0 or 1,
+			TextColor3 = active and C.gold or C.muted,
+		})
+		local s = btn:FindFirstChild("Stroke")
+		if s then tween(s, 0.2, {Transparency = active and 0 or 1}) end
+	end
+end
+paintTabs(currentTab)
 
 local function switchTab(name)
 	if name == currentTab then return end
@@ -2210,16 +2270,10 @@ local function switchTab(name)
 	local hidePage, showPage = TAB_PAGES[currentTab], TAB_PAGES[name]
 	currentTab = name
 
-	tween(indicator, 0.35, {
-		Position = UDim2.new((toIdx - 1) / 5, 3, 0, 3)
-	}, Enum.EasingStyle.Back)
-
-	for tabName, btn in pairs(TAB_BUTTONS) do
-		tween(btn, 0.2, {TextColor3 = (tabName == name) and C.black or C.muted})
-	end
+	paintTabs(name)
 
 	hidePage.Visible = false
-	showPage.Position = UDim2.fromOffset(toIdx > fromIdx and 48 or -12, 50)
+	showPage.Position = UDim2.fromOffset(toIdx > fromIdx and 54 or -26, 12)
 	showPage.Visible = true
 	tween(showPage, 0.35, {Position = PAGE_POS})
 
@@ -2227,11 +2281,9 @@ local function switchTab(name)
 	updateUI()
 end
 
-normalTab.MouseButton1Click:Connect(function() switchTab("Normal") end)
-friendsTab.MouseButton1Click:Connect(function() switchTab("Friends") end)
-allTab.MouseButton1Click:Connect(function() switchTab("All") end)
-toolsTab.MouseButton1Click:Connect(function() switchTab("Tools") end)
-vcTab.MouseButton1Click:Connect(function() switchTab("VC") end)
+for key, btn in pairs(TAB_BUTTONS) do
+	btn.MouseButton1Click:Connect(function() switchTab(key) end)
+end
 
 --------------------------------------------------------------------
 -- Minimize / close / toggle
@@ -2243,11 +2295,15 @@ local function setMinimized(state)
 	minBtn.Text = state and "+" or "–"
 	if state then
 		content.Visible = false
+		banner.Visible = false
 		tween(main, 0.35, {Size = MINI_SIZE}, Enum.EasingStyle.Back)
 	else
 		tween(main, 0.4, {Size = FULL_SIZE}, Enum.EasingStyle.Back)
 		task.delay(0.15, function()
-			if not minimized then content.Visible = true end
+			if not minimized then
+				content.Visible = true
+				banner.Visible = true
+			end
 		end)
 	end
 end
@@ -2260,15 +2316,13 @@ local function setVisible(state)
 	if state then
 		main.Visible = true
 		tween(mainScale, 0.45, {Scale = 1}, Enum.EasingStyle.Back)
-		-- Re-sync every button with the real ESP / spectate state, so the
-		-- window always matches what is actually happening in the game.
-		updateUI()
+		updateUI() -- re-sync every button with the real ESP / spectate state
 	else
 		local tw = tween(mainScale, 0.25, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
 		tw.Completed:Connect(function()
 			if not visible then main.Visible = false end
 		end)
-		-- Note: ESP is intentionally NOT touched here. It keeps running.
+		-- ESP is intentionally NOT touched here. It keeps running.
 	end
 end
 
@@ -2278,7 +2332,7 @@ end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
-	if input.KeyCode == Enum.KeyCode.K or input.KeyCode == Enum.KeyCode.RightShift then
+	if input.KeyCode == Enum.KeyCode.K then
 		setVisible(not visible)
 	elseif input.KeyCode == Enum.KeyCode.P then
 		toggleFreecam()
@@ -2317,15 +2371,6 @@ do
 	end)
 end
 
---------------------------------------------------------------------
--- Ambient animation: pulsing border
---------------------------------------------------------------------
-local t = 0
-RunService.Heartbeat:Connect(function(dt)
-	if not gui.Parent then return end
-	t += dt
-	border.Thickness = 2 + math.sin(t * 2.5) * 0.7
-end)
-
 -- Intro pop-in
+updateUI()
 tween(mainScale, 0.6, {Scale = 1}, Enum.EasingStyle.Back)
