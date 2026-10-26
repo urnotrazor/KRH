@@ -2873,20 +2873,18 @@ do
 	dock.Name = "DragDock"
 	dock.AnchorPoint = Vector2.new(0.5, 0)
 	dock.Size = UDim2.fromOffset(190, 22)
-	dock.BackgroundColor3 = C.bar
+	dock.BackgroundTransparency = 1 -- invisible hit area, only the gray bar shows
 	dock.BorderSizePixel = 0
 	dock.Text = ""
 	dock.AutoButtonColor = false
 	dock.Visible = false
 	dock.Parent = gui
-	corner(dock, 11)
-	stroke(dock, C.cardStroke, 1, 0)
 
 	local bar = Instance.new("Frame")
 	bar.AnchorPoint = Vector2.new(0.5, 0.5)
 	bar.Position = UDim2.fromScale(0.5, 0.5)
 	bar.Size = UDim2.fromOffset(110, 4)
-	bar.BackgroundColor3 = C.faint
+	bar.BackgroundColor3 = C.muted
 	bar.BorderSizePixel = 0
 	bar.Parent = dock
 	corner(bar, 2)
@@ -2909,7 +2907,7 @@ do
 	local function paint()
 		local active = hovering or dragging
 		tween(bar, 0.15, {
-			BackgroundColor3 = active and C.mint or C.faint,
+			BackgroundColor3 = active and C.mint or C.muted,
 			Size = UDim2.fromOffset(active and 140 or 110, 4),
 		})
 	end
