@@ -2571,6 +2571,40 @@ do
 		addHint(card, "When on, left click anywhere in the world to teleport there. When off, left click does nothing special.")
 	end
 
+	-- UGC emote (loads an outside emote menu script)
+	do
+		local card = makeCard(left, "UGC emote")
+		addHint(card, "Opens the UGC emote menu. Press it again to load a fresh copy.")
+		local emoteBtn = makeButton(card, "UGC EMOTE", "primary", 12)
+		emoteBtn.Name = "UgcEmoteButton"
+		emoteBtn.Size = UDim2.new(1, 0, 0, 34)
+		emoteBtn.LayoutOrder = nextOrder(card)
+
+		local EMOTE_URL = "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"
+		local loadingEmote = false
+
+		emoteBtn.MouseButton1Click:Connect(function()
+			if loadingEmote then return end
+			loadingEmote = true
+			emoteBtn.Text = "LOADING..."
+			setStatus("Loading UGC emote...", C.ok)
+
+			task.spawn(function()
+				local ok, err = pcall(function()
+					loadstring(game:HttpGet(EMOTE_URL))()
+				end)
+				if ok then
+					setStatus("UGC emote loaded", C.ok)
+				else
+					warn("UGC emote failed: " .. tostring(err))
+					setStatus("UGC emote failed to load", C.err)
+				end
+				emoteBtn.Text = "UGC EMOTE"
+				loadingEmote = false
+			end)
+		end)
+	end
+
 	-- Fly
 	do
 		local card, head = makeCard(right, "Fly")
