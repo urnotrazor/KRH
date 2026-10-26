@@ -1841,7 +1841,7 @@ do
 		tween(inputStroke, 0.2, {Color = C.cardStroke})
 	end)
 
-	addHint(pcard, "Type a name and the player card appears on the right. Press Enter to teleport to the match.")
+	addHint(pcard, "Type a name and the player card appears on the right. Use the TELEPORT button to go to them.")
 
 	-- Target card (pops out when the typed name matches someone) ----
 	local tcard = makeCard(right, "Target")
@@ -1965,12 +1965,6 @@ do
 	end)
 	cardEspBtn.MouseButton1Click:Connect(function()
 		toggleEsp(currentMatch)
-	end)
-	inputBox.FocusLost:Connect(function(enterPressed)
-		if enterPressed then
-			local target = currentMatch or findPlayer(inputBox.Text)
-			if target then teleportTo(target) else setStatus("Player not found", C.err) end
-		end
 	end)
 end
 
