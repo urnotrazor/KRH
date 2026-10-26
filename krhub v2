@@ -2832,12 +2832,12 @@ UserInputService.InputBegan:Connect(function(input, processed)
 end)
 
 --------------------------------------------------------------------
--- Dragging (by title bar)
+-- Dragging (title bar + the slim handle at the bottom)
 --------------------------------------------------------------------
-do
-	local dragging, dragStart, startPos
+local dragging, dragStart, startPos
 
-	titleBar.InputBegan:Connect(function(input)
+local function makeDraggable(handle)
+	handle.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
@@ -2850,17 +2850,66 @@ do
 			end)
 		end
 	end)
+end
 
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			local delta = input.Position - dragStart
-			main.Position = UDim2.new(
-				startPos.X.Scale, startPos.X.Offset + delta.X,
-				startPos.Y.Scale, startPos.Y.Offset + delta.Y
-			)
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+		or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		main.Position = UDim2.new(
+			startPos.X.Scale, startPos.X.Offset + delta.X,
+			startPos.Y.Scale, startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+makeDraggable(titleBar)
+
+-- Bottom drag handle: a slim pill in the middle of the footer.
+-- The pill is small, but the clickable area around it is bigger so it's easy to grab.
+do
+	local grab = Instance.new("TextButton")
+	grab.Name = "DragHandle"
+	grab.AnchorPoint = Vector2.new(0.5, 0.5)
+	grab.Position = UDim2.new(0.5, 0, 0.5, 0)
+	grab.Size = UDim2.fromOffset(140, 34)
+	grab.BackgroundTransparency = 1
+	grab.Text = ""
+	grab.AutoButtonColor = false
+	grab.ZIndex = 4
+	grab.Parent = footer
+
+	local pill = Instance.new("Frame")
+	pill.AnchorPoint = Vector2.new(0.5, 0.5)
+	pill.Position = UDim2.fromScale(0.5, 0.5)
+	pill.Size = UDim2.fromOffset(56, 5)
+	pill.BackgroundColor3 = C.faint
+	pill.BorderSizePixel = 0
+	pill.Parent = grab
+	corner(pill, 3)
+
+	local hovering = false
+	local function paint()
+		local active = hovering or dragging
+		tween(pill, 0.15, {
+			BackgroundColor3 = active and C.mint or C.faint,
+			Size = UDim2.fromOffset(active and 72 or 56, 5),
+		})
+	end
+	grab.MouseEnter:Connect(function() hovering = true paint() end)
+	grab.MouseLeave:Connect(function() hovering = false paint() end)
+	grab.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			paint()
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					paint()
+				end
+			end)
 		end
 	end)
+	makeDraggable(grab)
 end
 
 --------------------------------------------------------------------
