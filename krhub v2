@@ -2865,40 +2865,57 @@ end)
 
 makeDraggable(titleBar)
 
--- Bottom drag handle: a slim pill in the middle of the footer.
--- The pill is small, but the clickable area around it is bigger so it's easy to grab.
+-- Floating drag handle that hovers just below the panel.
+-- It lives in the ScreenGui (not inside the panel, which clips its children)
+-- and follows the panel's position and size.
 do
-	local grab = Instance.new("TextButton")
-	grab.Name = "DragHandle"
-	grab.AnchorPoint = Vector2.new(0.5, 0.5)
-	grab.Position = UDim2.new(0.5, 0, 0.5, 0)
-	grab.Size = UDim2.fromOffset(140, 34)
-	grab.BackgroundTransparency = 1
-	grab.Text = ""
-	grab.AutoButtonColor = false
-	grab.ZIndex = 4
-	grab.Parent = footer
+	local dock = Instance.new("TextButton")
+	dock.Name = "DragDock"
+	dock.AnchorPoint = Vector2.new(0.5, 0)
+	dock.Size = UDim2.fromOffset(190, 22)
+	dock.BackgroundColor3 = C.bar
+	dock.BorderSizePixel = 0
+	dock.Text = ""
+	dock.AutoButtonColor = false
+	dock.Visible = false
+	dock.Parent = gui
+	corner(dock, 11)
+	stroke(dock, C.cardStroke, 1, 0)
 
-	local pill = Instance.new("Frame")
-	pill.AnchorPoint = Vector2.new(0.5, 0.5)
-	pill.Position = UDim2.fromScale(0.5, 0.5)
-	pill.Size = UDim2.fromOffset(56, 5)
-	pill.BackgroundColor3 = C.faint
-	pill.BorderSizePixel = 0
-	pill.Parent = grab
-	corner(pill, 3)
+	local bar = Instance.new("Frame")
+	bar.AnchorPoint = Vector2.new(0.5, 0.5)
+	bar.Position = UDim2.fromScale(0.5, 0.5)
+	bar.Size = UDim2.fromOffset(110, 4)
+	bar.BackgroundColor3 = C.faint
+	bar.BorderSizePixel = 0
+	bar.Parent = dock
+	corner(bar, 2)
+
+	local function follow()
+		local x = main.AbsolutePosition.X + main.AbsoluteSize.X / 2
+		local y = main.AbsolutePosition.Y + main.AbsoluteSize.Y + 8
+		y = math.min(y, gui.AbsoluteSize.Y - 26) -- stay on screen
+		dock.Position = UDim2.fromOffset(x, y)
+		dock.Visible = main.Visible and mainScale.Scale > 0.6
+	end
+	main:GetPropertyChangedSignal("AbsolutePosition"):Connect(follow)
+	main:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow)
+	main:GetPropertyChangedSignal("Visible"):Connect(follow)
+	mainScale:GetPropertyChangedSignal("Scale"):Connect(follow)
+	gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow)
+	follow()
 
 	local hovering = false
 	local function paint()
 		local active = hovering or dragging
-		tween(pill, 0.15, {
+		tween(bar, 0.15, {
 			BackgroundColor3 = active and C.mint or C.faint,
-			Size = UDim2.fromOffset(active and 72 or 56, 5),
+			Size = UDim2.fromOffset(active and 140 or 110, 4),
 		})
 	end
-	grab.MouseEnter:Connect(function() hovering = true paint() end)
-	grab.MouseLeave:Connect(function() hovering = false paint() end)
-	grab.InputBegan:Connect(function(input)
+	dock.MouseEnter:Connect(function() hovering = true paint() end)
+	dock.MouseLeave:Connect(function() hovering = false paint() end)
+	dock.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			paint()
@@ -2909,7 +2926,7 @@ do
 			end)
 		end
 	end)
-	makeDraggable(grab)
+	makeDraggable(dock)
 end
 
 --------------------------------------------------------------------
