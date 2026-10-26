@@ -1906,62 +1906,115 @@ do
 end
 
 -- Page: Friends --------------------------------------------------------
+-- Left : friends in this server (TP / SPECTATE / ESP)
+-- Right: friends in the same game (other servers) + friends in other games
 local friendsHeader, friendList, emptyLabel
 local makeFriendRow
+local sameList, sameEmpty, sameHeader
+local otherList, otherEmpty, otherHeader
+local sameRefreshBtn, updatedLabel
+local rebuildOnlineLists          -- defined after the GUI (needs join logic)
+local fetchOnlineFriends          -- same
+local visible = true  -- GUI shown? (also used by the friend auto-refresh)
+local TeleportService = game:GetService("TeleportService")
 
-do
+local function makeListCard(parent, pos, size, title)
 	local fcard = Instance.new("Frame")
-	fcard.Name = "FriendsCard"
-	fcard.Size = UDim2.fromScale(1, 1)
+	fcard.Name = title:gsub("%s", "") .. "Card"
+	fcard.Position = pos
+	fcard.Size = size
 	fcard.BackgroundColor3 = C.card
 	fcard.BorderSizePixel = 0
-	fcard.Parent = friendsPage
+	fcard.Parent = parent
 	corner(fcard, 9)
 	stroke(fcard, C.cardStroke, 1, 0)
 
-	infoIcon(fcard, UDim2.fromOffset(12, 17))
+	infoIcon(fcard, UDim2.fromOffset(12, 14))
 
-	friendsHeader = label(fcard, {
-		Text = "Friends in this server",
+	local header = label(fcard, {
+		Text = title,
 		Font = Enum.Font.GothamBold,
 		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.fromOffset(38, 12),
-		Size = UDim2.new(1, -50, 0, 26),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(38, 9),
+		Size = UDim2.new(1, -140, 0, 24),
 	})
 
 	local div = Instance.new("Frame")
-	div.Position = UDim2.fromOffset(12, 44)
+	div.Position = UDim2.fromOffset(12, 42)
 	div.Size = UDim2.new(1, -24, 0, 1)
 	div.BackgroundColor3 = C.cardStroke
 	div.BorderSizePixel = 0
 	div.Parent = fcard
 
-	friendList = Instance.new("ScrollingFrame")
-	friendList.Name = "FriendList"
-	friendList.Position = UDim2.fromOffset(12, 54)
-	friendList.Size = UDim2.new(1, -24, 1, -66)
-	friendList.BackgroundTransparency = 1
-	friendList.BorderSizePixel = 0
-	friendList.ScrollBarThickness = 3
-	friendList.ScrollBarImageColor3 = C.faint
-	friendList.CanvasSize = UDim2.new()
-	friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	friendList.Parent = fcard
+	local list = Instance.new("ScrollingFrame")
+	list.Name = "List"
+	list.Position = UDim2.fromOffset(12, 50)
+	list.Size = UDim2.new(1, -24, 1, -58)
+	list.BackgroundTransparency = 1
+	list.BorderSizePixel = 0
+	list.ScrollBarThickness = 3
+	list.ScrollBarImageColor3 = C.faint
+	list.CanvasSize = UDim2.new()
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.Parent = fcard
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.Padding = UDim.new(0, 6)
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Parent = friendList
+	listLayout.Parent = list
 
-	emptyLabel = label(fcard, {
-		Text = "No friends in this server",
+	local empty = label(fcard, {
+		Text = "Nobody here",
 		Font = Enum.Font.Gotham,
-		TextSize = 13,
+		TextSize = 12,
 		TextColor3 = C.faint,
-		Position = UDim2.fromOffset(0, 96),
-		Size = UDim2.new(1, 0, 0, 30),
+		Position = UDim2.fromOffset(0, 62),
+		Size = UDim2.new(1, 0, 0, 24),
 		Visible = false,
+	})
+
+	return fcard, header, list, empty
+end
+
+do
+	local leftCard
+	leftCard, friendsHeader, friendList, emptyLabel = makeListCard(
+		friendsPage, UDim2.fromOffset(0, 0), UDim2.new(0.5, -7, 1, 0), "Friends in this server")
+	emptyLabel.Text = "No friends in this server"
+
+	local rightHolder = Instance.new("Frame")
+	rightHolder.BackgroundTransparency = 1
+	rightHolder.Position = UDim2.new(0.5, 7, 0, 0)
+	rightHolder.Size = UDim2.new(0.5, -7, 1, 0)
+	rightHolder.Parent = friendsPage
+
+	local topCard, bottomCard
+	topCard, sameHeader, sameList, sameEmpty = makeListCard(
+		rightHolder, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0.5, -5), "Same game")
+	sameEmpty.Text = "No friends in other servers of this game"
+
+	bottomCard, otherHeader, otherList, otherEmpty = makeListCard(
+		rightHolder, UDim2.new(0, 0, 0.5, 5), UDim2.new(1, 0, 0.5, -5), "Playing other games")
+	otherEmpty.Text = "No friends playing other games"
+
+	-- Refresh button (top card header) + "updated Xs ago" (bottom card header)
+	sameRefreshBtn = makeButton(topCard, "REFRESH", "primary", 10)
+	sameRefreshBtn.Name = "RefreshButton"
+	sameRefreshBtn.AnchorPoint = Vector2.new(1, 0)
+	sameRefreshBtn.Position = UDim2.new(1, -12, 0, 9)
+	sameRefreshBtn.Size = UDim2.fromOffset(84, 26)
+
+	updatedLabel = label(bottomCard, {
+		Text = "Not updated yet",
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 9),
+		Size = UDim2.fromOffset(110, 24),
 	})
 
 	makeFriendRow = function(p, order)
@@ -1981,8 +2034,8 @@ do
 			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Position = UDim2.fromOffset(12, 5),
-			Size = UDim2.new(1, -230, 0, 20),
+			Position = UDim2.fromOffset(10, 5),
+			Size = UDim2.new(1, -170, 0, 20),
 		})
 		label(row, {
 			Text = "@" .. p.Name,
@@ -1991,22 +2044,22 @@ do
 			TextColor3 = C.muted,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Position = UDim2.fromOffset(12, 24),
-			Size = UDim2.new(1, -230, 0, 16),
+			Position = UDim2.fromOffset(10, 24),
+			Size = UDim2.new(1, -170, 0, 16),
 		})
 
 		-- right to left: ESP | SPECTATE | TP
 		local espBtn = makeButton(row, "ESP", "ghost", 10)
-		espBtn.Size = UDim2.fromOffset(52, 28)
-		espBtn.Position = UDim2.new(1, -62, 0.5, -14)
+		espBtn.Size = UDim2.fromOffset(42, 28)
+		espBtn.Position = UDim2.new(1, -46, 0.5, -14)
 
-		local specBtn = makeButton(row, "SPECTATE", "ghost", 10)
-		specBtn.Size = UDim2.fromOffset(84, 28)
-		specBtn.Position = UDim2.new(1, -152, 0.5, -14)
+		local specBtn = makeButton(row, "SPECTATE", "ghost", 9)
+		specBtn.Size = UDim2.fromOffset(66, 28)
+		specBtn.Position = UDim2.new(1, -116, 0.5, -14)
 
 		local tp = makeButton(row, "TP", "primary", 11)
-		tp.Size = UDim2.fromOffset(44, 28)
-		tp.Position = UDim2.new(1, -202, 0.5, -14)
+		tp.Size = UDim2.fromOffset(36, 28)
+		tp.Position = UDim2.new(1, -156, 0.5, -14)
 
 		tp.MouseButton1Click:Connect(function() teleportTo(p) end)
 		specBtn.MouseButton1Click:Connect(function()
@@ -2020,6 +2073,261 @@ do
 		tween(rowStroke, 0.3, {Transparency = 0})
 	end
 end
+
+--------------------------------------------------------------------
+-- Online friends (same game / other games) + server hop
+--------------------------------------------------------------------
+local onlineFriends = {}      -- latest GetFriendsOnline result
+local lastFetch = 0           -- os.clock() of the last successful fetch
+local fetching = false
+local REFRESH_COOLDOWN = 10   -- seconds between manual refreshes
+local MAX_JOIN_TRIES = 20     -- how many times to retry a full server
+local JOIN_RETRY_DELAY = 6    -- seconds between retries
+
+local joinTarget = nil        -- UserId currently being joined
+local joinToken = 0           -- bumps to cancel old retry loops
+local joinButtons = {}        -- [UserId] = JOIN button (for the STOP label)
+
+local function isInGame(f)
+	return f.PlaceId ~= nil and f.GameId ~= nil and (f.LocationType == 4 or f.LocationType == 1)
+end
+
+local function setJoinLabels()
+	for userId, btn in pairs(joinButtons) do
+		if btn.Parent then
+			setToggleStyle(btn, joinTarget == userId, "STOP", "JOIN")
+		end
+	end
+end
+
+local function stopJoining(silent)
+	joinToken += 1
+	joinTarget = nil
+	setJoinLabels()
+	if not silent then setStatus("Join cancelled", C.muted) end
+end
+
+local function findOnline(userId)
+	for _, f in ipairs(onlineFriends) do
+		if f.VisitorId == userId then return f end
+	end
+end
+
+-- Join a friend's exact server. If it's full (or we're flooding the
+-- teleport service) it keeps retrying until a slot opens or you press STOP.
+local function joinFriend(f)
+	if joinTarget == f.VisitorId then
+		stopJoining()
+		return
+	end
+
+	joinToken += 1
+	local myToken = joinToken
+	joinTarget = f.VisitorId
+	setJoinLabels()
+
+	task.spawn(function()
+		local tries = 0
+		local current = f
+		while joinToken == myToken do
+			tries += 1
+			setStatus(("Joining %s (try %d/%d)"):format(f.DisplayName, tries, MAX_JOIN_TRIES), C.ok)
+
+			local failedResult
+			local conn
+			conn = TeleportService.TeleportInitFailed:Connect(function(_, result)
+				failedResult = result
+			end)
+
+			local ok, err = pcall(function()
+				TeleportService:TeleportToPlaceInstance(current.PlaceId, current.GameId, player)
+			end)
+
+			if not ok then
+				conn:Disconnect()
+				stopJoining(true)
+				setStatus("Join failed: " .. tostring(err), C.err)
+				return
+			end
+
+			-- wait a few seconds to see whether the teleport actually failed
+			local waited = 0
+			while waited < 4 and not failedResult and joinToken == myToken do
+				task.wait(0.25)
+				waited += 0.25
+			end
+			conn:Disconnect()
+			if joinToken ~= myToken then return end
+			if not failedResult then
+				return -- teleport is happening, nothing else to do
+			end
+
+			local retryable = failedResult == Enum.TeleportResult.GameFull
+				or failedResult == Enum.TeleportResult.Flooded
+			if not retryable then
+				stopJoining(true)
+				if failedResult == Enum.TeleportResult.Unauthorized then
+					setStatus("Can't join: not allowed (private or restricted)", C.err)
+				elseif failedResult == Enum.TeleportResult.GameEnded then
+					setStatus("That server no longer exists", C.err)
+				else
+					setStatus("Join failed: " .. tostring(failedResult.Name), C.err)
+				end
+				return
+			end
+
+			if tries >= MAX_JOIN_TRIES then
+				stopJoining(true)
+				setStatus("Server stayed full, gave up", C.err)
+				return
+			end
+
+			-- server full: wait, then look up where the friend is now
+			for i = JOIN_RETRY_DELAY, 1, -1 do
+				if joinToken ~= myToken then return end
+				setStatus(
+					("%s - retry in %ds (%d/%d)"):format(
+						failedResult == Enum.TeleportResult.GameFull and "Server full" or "Slow down",
+						i, tries, MAX_JOIN_TRIES),
+					C.muted
+				)
+				task.wait(1)
+			end
+			if joinToken ~= myToken then return end
+
+			if fetchOnlineFriends then fetchOnlineFriends(true) end
+			local fresh = findOnline(f.VisitorId)
+			if not fresh or not isInGame(fresh) then
+				stopJoining(true)
+				setStatus(f.DisplayName .. " left that game", C.err)
+				return
+			end
+			current = fresh
+		end
+	end)
+end
+
+local function makeOnlineRow(listParent, f, order, sameGame)
+	local row = Instance.new("Frame")
+	row.Name = "Online_" .. f.VisitorId
+	row.Size = UDim2.new(1, -8, 0, 46)
+	row.BackgroundColor3 = C.field
+	row.BorderSizePixel = 0
+	row.LayoutOrder = order
+	row.Parent = listParent
+	corner(row, 8)
+	stroke(row, C.cardStroke, 1, 0)
+
+	label(row, {
+		Text = f.DisplayName or f.UserName,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(10, 5),
+		Size = UDim2.new(1, -86, 0, 20),
+	})
+	label(row, {
+		Text = sameGame and "Same game, other server" or (f.LastLocation or "In a game"),
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = sameGame and C.mint or C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(10, 24),
+		Size = UDim2.new(1, -86, 0, 16),
+	})
+
+	local joinBtn = makeButton(row, "JOIN", "primary", 11)
+	joinBtn.Size = UDim2.fromOffset(60, 28)
+	joinBtn.Position = UDim2.new(1, -66, 0.5, -14)
+	joinBtn.MouseButton1Click:Connect(function() joinFriend(f) end)
+	joinButtons[f.VisitorId] = joinBtn
+	if joinTarget == f.VisitorId then
+		setToggleStyle(joinBtn, true, "STOP", "JOIN")
+	end
+end
+
+rebuildOnlineLists = function()
+	for _, list in ipairs({sameList, otherList}) do
+		for _, child in ipairs(list:GetChildren()) do
+			if child:IsA("Frame") then child:Destroy() end
+		end
+	end
+	table.clear(joinButtons)
+
+	local sameN, otherN = 0, 0
+	for _, f in ipairs(onlineFriends) do
+		if isInGame(f) and f.GameId ~= game.JobId then
+			if f.PlaceId == game.PlaceId then
+				sameN += 1
+				makeOnlineRow(sameList, f, sameN, true)
+			else
+				otherN += 1
+				makeOnlineRow(otherList, f, otherN, false)
+			end
+		end
+	end
+
+	sameEmpty.Visible  = (sameN == 0)
+	otherEmpty.Visible = (otherN == 0)
+	sameHeader.Text    = ("Same game (%d)"):format(sameN)
+	otherHeader.Text   = ("Playing other games (%d)"):format(otherN)
+end
+
+-- force = true skips the cooldown (used by the retry loop)
+fetchOnlineFriends = function(force)
+	if fetching then return false end
+	if not force and os.clock() - lastFetch < REFRESH_COOLDOWN then return false end
+	fetching = true
+
+	local ok, result = pcall(function()
+		return player:GetFriendsOnline(200)
+	end)
+	fetching = false
+
+	if ok and type(result) == "table" then
+		onlineFriends = result
+		lastFetch = os.clock()
+		rebuildOnlineLists()
+		return true
+	end
+	setStatus("Couldn't load friend activity", C.err)
+	return false
+end
+
+-- Refresh button with a cooldown so Roblox doesn't rate limit you
+do
+	local cooling = false
+	sameRefreshBtn.MouseButton1Click:Connect(function()
+		if cooling or fetching then return end
+		cooling = true
+		sameRefreshBtn.Text = "..."
+		task.spawn(function()
+			local ok = fetchOnlineFriends(true)
+			if ok then setStatus("Friend activity updated", C.ok) end
+			lastFetch = os.clock()
+			for i = REFRESH_COOLDOWN, 1, -1 do
+				sameRefreshBtn.Text = "WAIT " .. i .. "s"
+				task.wait(1)
+			end
+			sameRefreshBtn.Text = "REFRESH"
+			cooling = false
+		end)
+	end)
+end
+
+-- "Updated Xs ago" text + auto refresh every 60s while the Friends tab is open
+task.spawn(function()
+	while gui.Parent do
+		task.wait(1)
+		if lastFetch > 0 then
+			updatedLabel.Text = ("Updated %ds ago"):format(math.floor(os.clock() - lastFetch))
+		end
+		if currentTab == "Friends" and visible and os.clock() - lastFetch >= 60 and not fetching then
+			fetchOnlineFriends(true)
+		end
+	end
+end)
 
 -- Page: Misc -------------------------------------------------------------
 do
@@ -2340,7 +2648,10 @@ local function switchTab(name)
 	showPage.Visible = true
 	tween(showPage, 0.35, {Position = PAGE_POS})
 
-	if name == "Friends" then refreshFriends() end
+	if name == "Friends" then
+		refreshFriends()
+		if os.clock() - lastFetch >= 20 then task.spawn(fetchOnlineFriends, true) end
+	end
 	updateUI()
 end
 
@@ -2373,7 +2684,7 @@ end
 
 minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
 
-local visible = true
+visible = true
 local function setVisible(state)
 	visible = state
 	if state then
