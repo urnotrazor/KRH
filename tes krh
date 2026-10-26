@@ -1,6 +1,6 @@
 --[[
 	KRHUB Teleport GUI  (LocalScript)
-	Style reference: BlurAutoClicker (dark cards, gold accent, OFF/ON switches)
+	Style reference: BlurAutoClicker (dark cards, green #06402B accent, OFF/ON switches)
 
 	Tabs (top left):
 	  Teleport - type a username / display name. A player card pops out with
@@ -44,10 +44,11 @@ local C = {
 	text       = Color3.fromRGB(235, 235, 235),
 	muted      = Color3.fromRGB(135, 135, 135),
 	faint      = Color3.fromRGB(70, 70, 70),
-	gold       = Color3.fromRGB(226, 168, 34),
-	goldBg     = Color3.fromRGB(58, 47, 14),
-	goldLine   = Color3.fromRGB(96, 76, 22),
-	goldText   = Color3.fromRGB(205, 190, 150),
+	gold       = Color3.fromHex("06402B"), -- main accent fill
+	mint       = Color3.fromRGB(72, 205, 142), -- readable accent for text / outlines
+	goldBg     = Color3.fromHex("06402B"),
+	goldLine   = Color3.fromRGB(16, 112, 76),
+	goldText   = Color3.fromRGB(196, 232, 212),
 	red        = Color3.fromRGB(200, 68, 60),
 	ok         = Color3.fromRGB(255, 255, 255),
 	err        = Color3.fromRGB(235, 120, 110),
@@ -153,14 +154,14 @@ local function makeButton(parent, text, style, textSize)
 	b.BorderSizePixel = 0
 	if style == "primary" then
 		b.BackgroundColor3 = C.gold
-		b.TextColor3 = C.black
+		b.TextColor3 = C.text
 	else
 		b.BackgroundColor3 = C.field
 		b.TextColor3 = C.text
 	end
 	b.Parent = parent
 	corner(b, 7)
-	local s = stroke(b, style == "primary" and C.gold or C.cardStroke, 1, 0)
+	local s = stroke(b, style == "primary" and C.goldLine or C.cardStroke, 1, 0)
 	s.Name = "Stroke"
 	b:SetAttribute("base", b.BackgroundColor3)
 	makeInteractive(b)
@@ -172,9 +173,9 @@ local function setToggleStyle(btn, active, activeText, idleText)
 	if not btn then return end
 	btn.Text = active and activeText or idleText
 	btn:SetAttribute("base", active and C.goldBg or C.field)
-	tween(btn, 0.2, {TextColor3 = active and C.gold or C.text})
+	tween(btn, 0.2, {TextColor3 = active and C.mint or C.text})
 	local s = btn:FindFirstChild("Stroke")
-	if s then tween(s, 0.2, {Color = active and C.gold or C.cardStroke}) end
+	if s then tween(s, 0.2, {Color = active and C.mint or C.cardStroke}) end
 end
 
 local function trim(s)
@@ -242,12 +243,15 @@ local function makeSegmented(parent, options, size, selColors)
 		b.Parent = inner
 		buttons[i] = b
 		b.MouseButton1Click:Connect(function()
-			if current == i then return end
-			set(i)
-			if api.onSelect then api.onSelect(i) end
+			-- flip mode: clicking anywhere on the switch flips it
+			local idx = api.flip and ((current == 1) and 2 or 1) or i
+			if current == idx then return end
+			set(idx)
+			if api.onSelect then api.onSelect(idx) end
 		end)
 	end
 
+	api.flip = true
 	api.frame = frame
 	api.set = set
 	set(1, true)
@@ -457,7 +461,7 @@ local bannerSummary = label(banner, {
 	Text = "",
 	Font = Enum.Font.GothamMedium,
 	TextSize = 11,
-	TextColor3 = C.gold,
+	TextColor3 = C.mint,
 	TextTruncate = Enum.TextTruncate.AtEnd,
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, -14, 0.5, 0),
@@ -465,9 +469,9 @@ local bannerSummary = label(banner, {
 	Visible = false,
 })
 bannerSummary.BackgroundTransparency = 0
-bannerSummary.BackgroundColor3 = Color3.fromRGB(40, 32, 10)
+bannerSummary.BackgroundColor3 = Color3.fromRGB(4, 42, 29)
 corner(bannerSummary, 6)
-stroke(bannerSummary, C.gold, 1, 0.2)
+stroke(bannerSummary, C.mint, 1, 0.2)
 
 local function setStatus(text, color)
 	if color == nil or color == C.muted then
@@ -1553,7 +1557,7 @@ end
 
 -- OFF / ON switch on the right side of a card header
 local function addSwitch(head, key, onChange)
-	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.gold})
+	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
 	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
 	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
 	seg.onSelect = function(idx)
@@ -1596,7 +1600,7 @@ local function makeValueBox(parent, text, unit)
 		Size = UDim2.fromOffset(24, 26),
 	})
 
-	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.gold}) end)
+	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.mint}) end)
 	box.FocusLost:Connect(function() tween(bs, 0.2, {Color = C.cardStroke}) end)
 	return box
 end
@@ -1625,7 +1629,7 @@ local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onCh
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = C.gold
+	fill.BackgroundColor3 = C.mint
 	fill.BorderSizePixel = 0
 	fill.Parent = track
 	corner(fill, 3)
@@ -1762,7 +1766,7 @@ do
 	local inputStroke = stroke(inputBox, C.cardStroke, 1, 0)
 
 	inputBox.Focused:Connect(function()
-		tween(inputStroke, 0.2, {Color = C.gold})
+		tween(inputStroke, 0.2, {Color = C.mint})
 	end)
 	inputBox.FocusLost:Connect(function()
 		tween(inputStroke, 0.2, {Color = C.cardStroke})
@@ -2076,6 +2080,65 @@ do
 		addHint(card, "Stops you from being kicked for idling.")
 	end
 
+	-- Rejoin (a plain button, not a switch)
+	do
+		local card = makeCard(right, "Rejoin")
+		addHint(card, "Leaves and rejoins this server (or a new one if you're alone).")
+		local rejoinBtn = makeButton(card, "REJOIN", "primary", 12)
+		rejoinBtn.Name = "RejoinButton"
+		rejoinBtn.Size = UDim2.new(1, 0, 0, 34)
+		rejoinBtn.LayoutOrder = nextOrder(card)
+
+		local TeleportService = game:GetService("TeleportService")
+		local placeId, jobId = game.PlaceId, game.JobId
+		local MAX_RETRIES = 3
+		local attempts = 0
+		local rejoining = false
+
+		local function go()
+			attempts += 1
+			local alone = #Players:GetPlayers() <= 1
+			local ok, err = pcall(function()
+				if alone then
+					TeleportService:Teleport(placeId, player)
+				else
+					TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+				end
+			end)
+			if not ok then
+				warn("Rejoin failed: " .. tostring(err))
+				if attempts < MAX_RETRIES then
+					task.wait(1)
+					return go()
+				end
+				rejoining = false
+				rejoinBtn.Text = "REJOIN"
+				setStatus("Rejoin failed", C.err)
+			end
+		end
+
+		TeleportService.TeleportInitFailed:Connect(function()
+			if not rejoining then return end
+			if attempts < MAX_RETRIES then
+				task.wait(1)
+				go()
+			else
+				rejoining = false
+				rejoinBtn.Text = "REJOIN"
+				setStatus("Rejoin failed", C.err)
+			end
+		end)
+
+		rejoinBtn.MouseButton1Click:Connect(function()
+			if rejoining then return end
+			rejoining = true
+			attempts = 0
+			rejoinBtn.Text = "REJOINING..."
+			setStatus("Rejoining...", C.ok)
+			task.spawn(go)
+		end)
+	end
+
 	-- Walk speed
 	do
 		local card, head = makeCard(right, "Walk speed")
@@ -2256,7 +2319,7 @@ local function paintTabs(name)
 		local active = (key == name)
 		tween(btn, 0.2, {
 			BackgroundTransparency = active and 0 or 1,
-			TextColor3 = active and C.gold or C.muted,
+			TextColor3 = active and C.mint or C.muted,
 		})
 		local s = btn:FindFirstChild("Stroke")
 		if s then tween(s, 0.2, {Transparency = active and 0 or 1}) end
