@@ -489,7 +489,7 @@ local content = Instance.new("Frame")
 content.Name = "Content"
 content.BackgroundTransparency = 1
 content.Position = UDim2.fromOffset(0, 70)
-content.Size = UDim2.new(1, 0, 1, -108)
+content.Size = UDim2.new(1, 0, 1, -122)
 content.Parent = main
 
 -- Footer: your avatar + name (bottom left) and the resize grip (bottom right)
@@ -497,7 +497,7 @@ local footer = Instance.new("Frame")
 footer.Name = "Footer"
 footer.AnchorPoint = Vector2.new(0, 1)
 footer.Position = UDim2.new(0, 0, 1, 0)
-footer.Size = UDim2.new(1, 0, 0, 38)
+footer.Size = UDim2.new(1, 0, 0, 52)
 footer.BackgroundColor3 = C.bar
 footer.BorderSizePixel = 0
 footer.Parent = main
@@ -511,31 +511,32 @@ footerLine.Parent = footer
 local meAvatar = Instance.new("ImageLabel")
 meAvatar.Name = "MyAvatar"
 meAvatar.Position = UDim2.fromOffset(12, 6)
-meAvatar.Size = UDim2.fromOffset(26, 26)
+meAvatar.Size = UDim2.fromOffset(40, 40)
 meAvatar.BackgroundColor3 = C.field
 meAvatar.BorderSizePixel = 0
 meAvatar.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100"):format(player.UserId)
 meAvatar.Parent = footer
-corner(meAvatar, 13)
+corner(meAvatar, 20)
+stroke(meAvatar, C.goldLine, 2, 0)
 
 label(footer, {
 	Text = player.DisplayName,
 	Font = Enum.Font.GothamBold,
-	TextSize = 12,
+	TextSize = 14,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(46, 4),
-	Size = UDim2.new(0.5, -60, 0, 16),
+	Position = UDim2.fromOffset(62, 8),
+	Size = UDim2.new(0.5, -76, 0, 18),
 })
 label(footer, {
 	Text = "@" .. player.Name,
 	Font = Enum.Font.Gotham,
-	TextSize = 10,
+	TextSize = 11,
 	TextColor3 = C.muted,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(46, 20),
-	Size = UDim2.new(0.5, -60, 0, 14),
+	Position = UDim2.fromOffset(62, 27),
+	Size = UDim2.new(0.5, -76, 0, 16),
 })
 
 local function updatePlayerCount()
@@ -2955,23 +2956,23 @@ task.spawn(function()
 
 	tween(box, 0.25, {GroupTransparency = 0})
 	tween(boxScale, 0.3, {Scale = 1})
+	task.wait(0.25)
 
 	local steps = {
-		{"Loading interface", 0.4},
-		{"Checking friends",  0.8},
-		{"Almost ready",      1.0},
+		{"Loading interface", 0.35, 0.8},
+		{"Checking friends",  0.75, 0.9},
+		{"Almost ready",      1.0, 0.8},
 	}
 	for i, step in ipairs(steps) do
 		stage.Text = step[1]
 		if i == 2 then
 			task.spawn(function() pcall(fetchOnlineFriends, true) end)
 		end
-		local tw = tween(progress, 0.28, {Value = step[2]}, Enum.EasingStyle.Quad)
+		local tw = tween(progress, step[3], {Value = step[2]}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
 		tw.Completed:Wait()
-		task.wait(0.05)
 	end
 
-	task.wait(0.1)
+	task.wait(0.15)
 	local out = tween(box, 0.25, {GroupTransparency = 1})
 	tween(boxScale, 0.25, {Scale = 0.94})
 	out.Completed:Wait()
