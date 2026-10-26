@@ -1,6 +1,6 @@
 --[[
 	KRHUB Teleport GUI  (LocalScript)
-	Style reference: BlurAutoClicker (dark cards, gold accent, OFF/ON switches)
+	Style reference: BlurAutoClicker (dark cards, green #06402B accent, OFF/ON switches)
 
 	Tabs (top left):
 	  Teleport - type a username / display name. A player card pops out with
@@ -44,17 +44,18 @@ local C = {
 	text       = Color3.fromRGB(235, 235, 235),
 	muted      = Color3.fromRGB(135, 135, 135),
 	faint      = Color3.fromRGB(70, 70, 70),
-	gold       = Color3.fromRGB(226, 168, 34),
-	goldBg     = Color3.fromRGB(58, 47, 14),
-	goldLine   = Color3.fromRGB(96, 76, 22),
-	goldText   = Color3.fromRGB(205, 190, 150),
+	gold       = Color3.fromHex("06402B"), -- main accent fill
+	mint       = Color3.fromRGB(72, 205, 142), -- readable accent for text / outlines
+	goldBg     = Color3.fromHex("06402B"),
+	goldLine   = Color3.fromRGB(16, 112, 76),
+	goldText   = Color3.fromRGB(196, 232, 212),
 	red        = Color3.fromRGB(200, 68, 60),
 	ok         = Color3.fromRGB(255, 255, 255),
 	err        = Color3.fromRGB(235, 120, 110),
 }
 
-local FULL_SIZE = UDim2.fromOffset(660, 420)
-local MINI_SIZE = UDim2.fromOffset(660, 40)
+local FULL_SIZE = UDim2.fromOffset(720, 440)
+local fullSize  = FULL_SIZE   -- current (resizable) size of the panel
 
 --------------------------------------------------------------------
 -- Helpers
@@ -153,14 +154,14 @@ local function makeButton(parent, text, style, textSize)
 	b.BorderSizePixel = 0
 	if style == "primary" then
 		b.BackgroundColor3 = C.gold
-		b.TextColor3 = C.black
+		b.TextColor3 = C.text
 	else
 		b.BackgroundColor3 = C.field
 		b.TextColor3 = C.text
 	end
 	b.Parent = parent
 	corner(b, 7)
-	local s = stroke(b, style == "primary" and C.gold or C.cardStroke, 1, 0)
+	local s = stroke(b, style == "primary" and C.goldLine or C.cardStroke, 1, 0)
 	s.Name = "Stroke"
 	b:SetAttribute("base", b.BackgroundColor3)
 	makeInteractive(b)
@@ -172,9 +173,9 @@ local function setToggleStyle(btn, active, activeText, idleText)
 	if not btn then return end
 	btn.Text = active and activeText or idleText
 	btn:SetAttribute("base", active and C.goldBg or C.field)
-	tween(btn, 0.2, {TextColor3 = active and C.gold or C.text})
+	tween(btn, 0.2, {TextColor3 = active and C.mint or C.text})
 	local s = btn:FindFirstChild("Stroke")
-	if s then tween(s, 0.2, {Color = active and C.gold or C.cardStroke}) end
+	if s then tween(s, 0.2, {Color = active and C.mint or C.cardStroke}) end
 end
 
 local function trim(s)
@@ -242,12 +243,15 @@ local function makeSegmented(parent, options, size, selColors)
 		b.Parent = inner
 		buttons[i] = b
 		b.MouseButton1Click:Connect(function()
-			if current == i then return end
-			set(i)
-			if api.onSelect then api.onSelect(i) end
+			-- flip mode: clicking anywhere on the switch flips it
+			local idx = api.flip and ((current == 1) and 2 or 1) or i
+			if current == idx then return end
+			set(idx)
+			if api.onSelect then api.onSelect(idx) end
 		end)
 	end
 
+	api.flip = true
 	api.frame = frame
 	api.set = set
 	set(1, true)
@@ -311,6 +315,7 @@ main.Name = "Main"
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.Position = UDim2.fromScale(0.5, 0.5)
 main.Size = FULL_SIZE
+main.Visible = false -- shown after the loading bar
 main.BackgroundColor3 = C.bg
 main.BorderSizePixel = 0
 main.ClipsDescendants = true
@@ -457,7 +462,7 @@ local bannerSummary = label(banner, {
 	Text = "",
 	Font = Enum.Font.GothamMedium,
 	TextSize = 11,
-	TextColor3 = C.gold,
+	TextColor3 = C.mint,
 	TextTruncate = Enum.TextTruncate.AtEnd,
 	AnchorPoint = Vector2.new(1, 0.5),
 	Position = UDim2.new(1, -14, 0.5, 0),
@@ -465,9 +470,9 @@ local bannerSummary = label(banner, {
 	Visible = false,
 })
 bannerSummary.BackgroundTransparency = 0
-bannerSummary.BackgroundColor3 = Color3.fromRGB(40, 32, 10)
+bannerSummary.BackgroundColor3 = Color3.fromRGB(4, 42, 29)
 corner(bannerSummary, 6)
-stroke(bannerSummary, C.gold, 1, 0.2)
+stroke(bannerSummary, C.mint, 1, 0.2)
 
 local function setStatus(text, color)
 	if color == nil or color == C.muted then
@@ -484,8 +489,76 @@ local content = Instance.new("Frame")
 content.Name = "Content"
 content.BackgroundTransparency = 1
 content.Position = UDim2.fromOffset(0, 70)
-content.Size = UDim2.new(1, 0, 1, -70)
+content.Size = UDim2.new(1, 0, 1, -122)
 content.Parent = main
+
+-- Footer: your avatar + name (bottom left) and the resize grip (bottom right)
+local footer = Instance.new("Frame")
+footer.Name = "Footer"
+footer.AnchorPoint = Vector2.new(0, 1)
+footer.Position = UDim2.new(0, 0, 1, 0)
+footer.Size = UDim2.new(1, 0, 0, 52)
+footer.BackgroundColor3 = C.bar
+footer.BorderSizePixel = 0
+footer.Parent = main
+
+local footerLine = Instance.new("Frame")
+footerLine.Size = UDim2.new(1, 0, 0, 1)
+footerLine.BackgroundColor3 = C.cardStroke
+footerLine.BorderSizePixel = 0
+footerLine.Parent = footer
+
+-- Profile chip: one rounded pill holding avatar + names
+local chip = Instance.new("Frame")
+chip.Name = "ProfileChip"
+chip.Position = UDim2.fromOffset(12, 8)
+chip.Size = UDim2.fromOffset(230, 36)
+chip.BackgroundColor3 = C.field
+chip.BorderSizePixel = 0
+chip.Parent = footer
+corner(chip, 18)
+stroke(chip, C.cardStroke, 1, 0)
+
+local meAvatar = Instance.new("ImageLabel")
+meAvatar.Name = "MyAvatar"
+meAvatar.Position = UDim2.fromOffset(3, 3)
+meAvatar.Size = UDim2.fromOffset(30, 30)
+meAvatar.BackgroundColor3 = C.card
+meAvatar.BorderSizePixel = 0
+meAvatar.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100"):format(player.UserId)
+meAvatar.Parent = chip
+corner(meAvatar, 15)
+
+-- little green "online" dot on the avatar
+local dot = Instance.new("Frame")
+dot.Position = UDim2.fromOffset(25, 25)
+dot.Size = UDim2.fromOffset(9, 9)
+dot.BackgroundColor3 = C.mint
+dot.BorderSizePixel = 0
+dot.ZIndex = 3
+dot.Parent = chip
+corner(dot, 5)
+stroke(dot, C.field, 2, 0)
+
+label(chip, {
+	Text = player.DisplayName,
+	Font = Enum.Font.GothamBold,
+	TextSize = 12,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(42, 4),
+	Size = UDim2.new(1, -54, 0, 16),
+})
+label(chip, {
+	Text = "@" .. player.Name,
+	Font = Enum.Font.Gotham,
+	TextSize = 10,
+	TextColor3 = C.muted,
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextTruncate = Enum.TextTruncate.AtEnd,
+	Position = UDim2.fromOffset(42, 19),
+	Size = UDim2.new(1, -54, 0, 13),
+})
 
 local function updatePlayerCount()
 	playerCount.Text = ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers)
@@ -1553,7 +1626,7 @@ end
 
 -- OFF / ON switch on the right side of a card header
 local function addSwitch(head, key, onChange)
-	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.gold})
+	local seg = makeSegmented(head, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
 	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
 	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
 	seg.onSelect = function(idx)
@@ -1596,7 +1669,7 @@ local function makeValueBox(parent, text, unit)
 		Size = UDim2.fromOffset(24, 26),
 	})
 
-	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.gold}) end)
+	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.mint}) end)
 	box.FocusLost:Connect(function() tween(bs, 0.2, {Color = C.cardStroke}) end)
 	return box
 end
@@ -1625,7 +1698,7 @@ local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onCh
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.fromScale(0, 1)
-	fill.BackgroundColor3 = C.gold
+	fill.BackgroundColor3 = C.mint
 	fill.BorderSizePixel = 0
 	fill.Parent = track
 	corner(fill, 3)
@@ -1762,13 +1835,13 @@ do
 	local inputStroke = stroke(inputBox, C.cardStroke, 1, 0)
 
 	inputBox.Focused:Connect(function()
-		tween(inputStroke, 0.2, {Color = C.gold})
+		tween(inputStroke, 0.2, {Color = C.mint})
 	end)
 	inputBox.FocusLost:Connect(function()
 		tween(inputStroke, 0.2, {Color = C.cardStroke})
 	end)
 
-	addHint(pcard, "Type a name and the player card appears on the right. Press Enter to teleport to the match.")
+	addHint(pcard, "Type a name and the player card appears on the right. Use the TELEPORT button to go to them.")
 
 	-- Target card (pops out when the typed name matches someone) ----
 	local tcard = makeCard(right, "Target")
@@ -1893,71 +1966,134 @@ do
 	cardEspBtn.MouseButton1Click:Connect(function()
 		toggleEsp(currentMatch)
 	end)
-	inputBox.FocusLost:Connect(function(enterPressed)
-		if enterPressed then
-			local target = currentMatch or findPlayer(inputBox.Text)
-			if target then teleportTo(target) else setStatus("Player not found", C.err) end
-		end
-	end)
 end
 
 -- Page: Friends --------------------------------------------------------
+-- Left : friends in this server (TP / SPECTATE / ESP)
+-- Right: friends in the same game (other servers) + friends in other games
 local friendsHeader, friendList, emptyLabel
 local makeFriendRow
+local sameList, sameEmpty, sameHeader
+local otherList, otherEmpty, otherHeader
+local sameRefreshBtn, updatedLabel
+local rebuildOnlineLists          -- defined after the GUI (needs join logic)
+local fetchOnlineFriends          -- same
+local ready = false   -- becomes true when the loading bar is done
+local visible = true  -- GUI shown? (also used by the friend auto-refresh)
+local TeleportService = game:GetService("TeleportService")
 
-do
+-- Round avatar (only used in the Friends tab). rbxthumb loads lazily,
+-- so building rows never waits on the network.
+local function makeAvatar(parent, userId)
+	local img = Instance.new("ImageLabel")
+	img.Name = "Avatar"
+	img.Position = UDim2.fromOffset(8, 7)
+	img.Size = UDim2.fromOffset(32, 32)
+	img.BackgroundColor3 = C.card
+	img.BorderSizePixel = 0
+	img.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100"):format(userId)
+	img.Parent = parent
+	corner(img, 16)
+	return img
+end
+
+local function makeListCard(parent, pos, size, title)
 	local fcard = Instance.new("Frame")
-	fcard.Name = "FriendsCard"
-	fcard.Size = UDim2.fromScale(1, 1)
+	fcard.Name = title:gsub("%s", "") .. "Card"
+	fcard.Position = pos
+	fcard.Size = size
 	fcard.BackgroundColor3 = C.card
 	fcard.BorderSizePixel = 0
-	fcard.Parent = friendsPage
+	fcard.Parent = parent
 	corner(fcard, 9)
 	stroke(fcard, C.cardStroke, 1, 0)
 
-	infoIcon(fcard, UDim2.fromOffset(12, 17))
+	infoIcon(fcard, UDim2.fromOffset(12, 14))
 
-	friendsHeader = label(fcard, {
-		Text = "Friends in this server",
+	local header = label(fcard, {
+		Text = title,
 		Font = Enum.Font.GothamBold,
 		TextSize = 14,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.fromOffset(38, 12),
-		Size = UDim2.new(1, -50, 0, 26),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(38, 9),
+		Size = UDim2.new(1, -140, 0, 24),
 	})
 
 	local div = Instance.new("Frame")
-	div.Position = UDim2.fromOffset(12, 44)
+	div.Position = UDim2.fromOffset(12, 42)
 	div.Size = UDim2.new(1, -24, 0, 1)
 	div.BackgroundColor3 = C.cardStroke
 	div.BorderSizePixel = 0
 	div.Parent = fcard
 
-	friendList = Instance.new("ScrollingFrame")
-	friendList.Name = "FriendList"
-	friendList.Position = UDim2.fromOffset(12, 54)
-	friendList.Size = UDim2.new(1, -24, 1, -66)
-	friendList.BackgroundTransparency = 1
-	friendList.BorderSizePixel = 0
-	friendList.ScrollBarThickness = 3
-	friendList.ScrollBarImageColor3 = C.faint
-	friendList.CanvasSize = UDim2.new()
-	friendList.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	friendList.Parent = fcard
+	local list = Instance.new("ScrollingFrame")
+	list.Name = "List"
+	list.Position = UDim2.fromOffset(12, 50)
+	list.Size = UDim2.new(1, -24, 1, -58)
+	list.BackgroundTransparency = 1
+	list.BorderSizePixel = 0
+	list.ScrollBarThickness = 3
+	list.ScrollBarImageColor3 = C.faint
+	list.CanvasSize = UDim2.new()
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.Parent = fcard
 
 	local listLayout = Instance.new("UIListLayout")
 	listLayout.Padding = UDim.new(0, 6)
 	listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	listLayout.Parent = friendList
+	listLayout.Parent = list
 
-	emptyLabel = label(fcard, {
-		Text = "No friends in this server",
+	local empty = label(fcard, {
+		Text = "Nobody here",
 		Font = Enum.Font.Gotham,
-		TextSize = 13,
+		TextSize = 12,
 		TextColor3 = C.faint,
-		Position = UDim2.fromOffset(0, 96),
-		Size = UDim2.new(1, 0, 0, 30),
+		Position = UDim2.fromOffset(0, 62),
+		Size = UDim2.new(1, 0, 0, 24),
 		Visible = false,
+	})
+
+	return fcard, header, list, empty
+end
+
+do
+	local leftCard
+	leftCard, friendsHeader, friendList, emptyLabel = makeListCard(
+		friendsPage, UDim2.fromOffset(0, 0), UDim2.new(0.5, -7, 1, 0), "Friends in this server")
+	emptyLabel.Text = "No friends in this server"
+
+	local rightHolder = Instance.new("Frame")
+	rightHolder.BackgroundTransparency = 1
+	rightHolder.Position = UDim2.new(0.5, 7, 0, 0)
+	rightHolder.Size = UDim2.new(0.5, -7, 1, 0)
+	rightHolder.Parent = friendsPage
+
+	local topCard, bottomCard
+	topCard, sameHeader, sameList, sameEmpty = makeListCard(
+		rightHolder, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0.5, -5), "Same game")
+	sameEmpty.Text = "No friends in other servers of this game"
+
+	bottomCard, otherHeader, otherList, otherEmpty = makeListCard(
+		rightHolder, UDim2.new(0, 0, 0.5, 5), UDim2.new(1, 0, 0.5, -5), "Playing other games")
+	otherEmpty.Text = "No friends playing other games"
+
+	-- Refresh button (top card header) + "updated Xs ago" (bottom card header)
+	sameRefreshBtn = makeButton(topCard, "REFRESH", "primary", 10)
+	sameRefreshBtn.Name = "RefreshButton"
+	sameRefreshBtn.AnchorPoint = Vector2.new(1, 0)
+	sameRefreshBtn.Position = UDim2.new(1, -12, 0, 9)
+	sameRefreshBtn.Size = UDim2.fromOffset(84, 26)
+
+	updatedLabel = label(bottomCard, {
+		Text = "Not updated yet",
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 9),
+		Size = UDim2.fromOffset(110, 24),
 	})
 
 	makeFriendRow = function(p, order)
@@ -1971,14 +2107,15 @@ do
 		row.Parent = friendList
 		corner(row, 8)
 		local rowStroke = stroke(row, C.cardStroke, 1, 1)
+		makeAvatar(row, p.UserId)
 
 		label(row, {
 			Text = p.DisplayName,
 			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Position = UDim2.fromOffset(12, 5),
-			Size = UDim2.new(1, -230, 0, 20),
+			Position = UDim2.fromOffset(48, 5),
+			Size = UDim2.new(1, -208, 0, 20),
 		})
 		label(row, {
 			Text = "@" .. p.Name,
@@ -1987,22 +2124,22 @@ do
 			TextColor3 = C.muted,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Position = UDim2.fromOffset(12, 24),
-			Size = UDim2.new(1, -230, 0, 16),
+			Position = UDim2.fromOffset(48, 24),
+			Size = UDim2.new(1, -208, 0, 16),
 		})
 
 		-- right to left: ESP | SPECTATE | TP
 		local espBtn = makeButton(row, "ESP", "ghost", 10)
-		espBtn.Size = UDim2.fromOffset(52, 28)
-		espBtn.Position = UDim2.new(1, -62, 0.5, -14)
+		espBtn.Size = UDim2.fromOffset(42, 28)
+		espBtn.Position = UDim2.new(1, -46, 0.5, -14)
 
-		local specBtn = makeButton(row, "SPECTATE", "ghost", 10)
-		specBtn.Size = UDim2.fromOffset(84, 28)
-		specBtn.Position = UDim2.new(1, -152, 0.5, -14)
+		local specBtn = makeButton(row, "SPECTATE", "ghost", 9)
+		specBtn.Size = UDim2.fromOffset(66, 28)
+		specBtn.Position = UDim2.new(1, -116, 0.5, -14)
 
 		local tp = makeButton(row, "TP", "primary", 11)
-		tp.Size = UDim2.fromOffset(44, 28)
-		tp.Position = UDim2.new(1, -202, 0.5, -14)
+		tp.Size = UDim2.fromOffset(36, 28)
+		tp.Position = UDim2.new(1, -156, 0.5, -14)
 
 		tp.MouseButton1Click:Connect(function() teleportTo(p) end)
 		specBtn.MouseButton1Click:Connect(function()
@@ -2016,6 +2153,262 @@ do
 		tween(rowStroke, 0.3, {Transparency = 0})
 	end
 end
+
+--------------------------------------------------------------------
+-- Online friends (same game / other games) + server hop
+--------------------------------------------------------------------
+local onlineFriends = {}      -- latest GetFriendsOnline result
+local lastFetch = 0           -- os.clock() of the last successful fetch
+local fetching = false
+local REFRESH_COOLDOWN = 10   -- seconds between manual refreshes
+local MAX_JOIN_TRIES = 20     -- how many times to retry a full server
+local JOIN_RETRY_DELAY = 6    -- seconds between retries
+
+local joinTarget = nil        -- UserId currently being joined
+local joinToken = 0           -- bumps to cancel old retry loops
+local joinButtons = {}        -- [UserId] = JOIN button (for the STOP label)
+
+local function isInGame(f)
+	return f.PlaceId ~= nil and f.GameId ~= nil and (f.LocationType == 4 or f.LocationType == 1)
+end
+
+local function setJoinLabels()
+	for userId, btn in pairs(joinButtons) do
+		if btn.Parent then
+			setToggleStyle(btn, joinTarget == userId, "STOP", "JOIN")
+		end
+	end
+end
+
+local function stopJoining(silent)
+	joinToken += 1
+	joinTarget = nil
+	setJoinLabels()
+	if not silent then setStatus("Join cancelled", C.muted) end
+end
+
+local function findOnline(userId)
+	for _, f in ipairs(onlineFriends) do
+		if f.VisitorId == userId then return f end
+	end
+end
+
+-- Join a friend's exact server. If it's full (or we're flooding the
+-- teleport service) it keeps retrying until a slot opens or you press STOP.
+local function joinFriend(f)
+	if joinTarget == f.VisitorId then
+		stopJoining()
+		return
+	end
+
+	joinToken += 1
+	local myToken = joinToken
+	joinTarget = f.VisitorId
+	setJoinLabels()
+
+	task.spawn(function()
+		local tries = 0
+		local current = f
+		while joinToken == myToken do
+			tries += 1
+			setStatus(("Joining %s (try %d/%d)"):format(f.DisplayName, tries, MAX_JOIN_TRIES), C.ok)
+
+			local failedResult
+			local conn
+			conn = TeleportService.TeleportInitFailed:Connect(function(_, result)
+				failedResult = result
+			end)
+
+			local ok, err = pcall(function()
+				TeleportService:TeleportToPlaceInstance(current.PlaceId, current.GameId, player)
+			end)
+
+			if not ok then
+				conn:Disconnect()
+				stopJoining(true)
+				setStatus("Join failed: " .. tostring(err), C.err)
+				return
+			end
+
+			-- wait a few seconds to see whether the teleport actually failed
+			local waited = 0
+			while waited < 4 and not failedResult and joinToken == myToken do
+				task.wait(0.25)
+				waited += 0.25
+			end
+			conn:Disconnect()
+			if joinToken ~= myToken then return end
+			if not failedResult then
+				return -- teleport is happening, nothing else to do
+			end
+
+			local retryable = failedResult == Enum.TeleportResult.GameFull
+				or failedResult == Enum.TeleportResult.Flooded
+			if not retryable then
+				stopJoining(true)
+				if failedResult == Enum.TeleportResult.Unauthorized then
+					setStatus("Can't join: not allowed (private or restricted)", C.err)
+				elseif failedResult == Enum.TeleportResult.GameEnded then
+					setStatus("That server no longer exists", C.err)
+				else
+					setStatus("Join failed: " .. tostring(failedResult.Name), C.err)
+				end
+				return
+			end
+
+			if tries >= MAX_JOIN_TRIES then
+				stopJoining(true)
+				setStatus("Server stayed full, gave up", C.err)
+				return
+			end
+
+			-- server full: wait, then look up where the friend is now
+			for i = JOIN_RETRY_DELAY, 1, -1 do
+				if joinToken ~= myToken then return end
+				setStatus(
+					("%s - retry in %ds (%d/%d)"):format(
+						failedResult == Enum.TeleportResult.GameFull and "Server full" or "Slow down",
+						i, tries, MAX_JOIN_TRIES),
+					C.muted
+				)
+				task.wait(1)
+			end
+			if joinToken ~= myToken then return end
+
+			if fetchOnlineFriends then fetchOnlineFriends(true) end
+			local fresh = findOnline(f.VisitorId)
+			if not fresh or not isInGame(fresh) then
+				stopJoining(true)
+				setStatus(f.DisplayName .. " left that game", C.err)
+				return
+			end
+			current = fresh
+		end
+	end)
+end
+
+local function makeOnlineRow(listParent, f, order, sameGame)
+	local row = Instance.new("Frame")
+	row.Name = "Online_" .. f.VisitorId
+	row.Size = UDim2.new(1, -8, 0, 46)
+	row.BackgroundColor3 = C.field
+	row.BorderSizePixel = 0
+	row.LayoutOrder = order
+	row.Parent = listParent
+	corner(row, 8)
+	stroke(row, C.cardStroke, 1, 0)
+	makeAvatar(row, f.VisitorId)
+
+	label(row, {
+		Text = f.DisplayName or f.UserName,
+		TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(48, 5),
+		Size = UDim2.new(1, -124, 0, 20),
+	})
+	label(row, {
+		Text = sameGame and "Same game, other server" or (f.LastLocation or "In a game"),
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = sameGame and C.mint or C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(48, 24),
+		Size = UDim2.new(1, -124, 0, 16),
+	})
+
+	local joinBtn = makeButton(row, "JOIN", "primary", 11)
+	joinBtn.Size = UDim2.fromOffset(60, 28)
+	joinBtn.Position = UDim2.new(1, -66, 0.5, -14)
+	joinBtn.MouseButton1Click:Connect(function() joinFriend(f) end)
+	joinButtons[f.VisitorId] = joinBtn
+	if joinTarget == f.VisitorId then
+		setToggleStyle(joinBtn, true, "STOP", "JOIN")
+	end
+end
+
+rebuildOnlineLists = function()
+	for _, list in ipairs({sameList, otherList}) do
+		for _, child in ipairs(list:GetChildren()) do
+			if child:IsA("Frame") then child:Destroy() end
+		end
+	end
+	table.clear(joinButtons)
+
+	local sameN, otherN = 0, 0
+	for _, f in ipairs(onlineFriends) do
+		if isInGame(f) and f.GameId ~= game.JobId then
+			if f.PlaceId == game.PlaceId then
+				sameN += 1
+				makeOnlineRow(sameList, f, sameN, true)
+			else
+				otherN += 1
+				makeOnlineRow(otherList, f, otherN, false)
+			end
+		end
+	end
+
+	sameEmpty.Visible  = (sameN == 0)
+	otherEmpty.Visible = (otherN == 0)
+	sameHeader.Text    = ("Same game (%d)"):format(sameN)
+	otherHeader.Text   = ("Playing other games (%d)"):format(otherN)
+end
+
+-- force = true skips the cooldown (used by the retry loop)
+fetchOnlineFriends = function(force)
+	if fetching then return false end
+	if not force and os.clock() - lastFetch < REFRESH_COOLDOWN then return false end
+	fetching = true
+
+	local ok, result = pcall(function()
+		return player:GetFriendsOnline(200)
+	end)
+	fetching = false
+
+	if ok and type(result) == "table" then
+		onlineFriends = result
+		lastFetch = os.clock()
+		rebuildOnlineLists()
+		return true
+	end
+	setStatus("Couldn't load friend activity", C.err)
+	return false
+end
+
+-- Refresh button with a cooldown so Roblox doesn't rate limit you
+do
+	local cooling = false
+	sameRefreshBtn.MouseButton1Click:Connect(function()
+		if cooling or fetching then return end
+		cooling = true
+		sameRefreshBtn.Text = "..."
+		task.spawn(function()
+			local ok = fetchOnlineFriends(true)
+			if ok then setStatus("Friend activity updated", C.ok) end
+			lastFetch = os.clock()
+			for i = REFRESH_COOLDOWN, 1, -1 do
+				sameRefreshBtn.Text = "WAIT " .. i .. "s"
+				task.wait(1)
+			end
+			sameRefreshBtn.Text = "REFRESH"
+			cooling = false
+		end)
+	end)
+end
+
+-- "Updated Xs ago" text + auto refresh every 60s while the Friends tab is open
+task.spawn(function()
+	while gui.Parent do
+		task.wait(1)
+		if lastFetch > 0 then
+			updatedLabel.Text = ("Updated %ds ago"):format(math.floor(os.clock() - lastFetch))
+		end
+		if currentTab == "Friends" and visible and os.clock() - lastFetch >= 60 and not fetching then
+			fetchOnlineFriends(true)
+		end
+	end
+end)
 
 -- Page: Misc -------------------------------------------------------------
 do
@@ -2076,6 +2469,65 @@ do
 		addHint(card, "Stops you from being kicked for idling.")
 	end
 
+	-- Rejoin (a plain button, not a switch)
+	do
+		local card = makeCard(right, "Rejoin")
+		addHint(card, "Leaves and rejoins this server (or a new one if you're alone).")
+		local rejoinBtn = makeButton(card, "REJOIN", "primary", 12)
+		rejoinBtn.Name = "RejoinButton"
+		rejoinBtn.Size = UDim2.new(1, 0, 0, 34)
+		rejoinBtn.LayoutOrder = nextOrder(card)
+
+		local TeleportService = game:GetService("TeleportService")
+		local placeId, jobId = game.PlaceId, game.JobId
+		local MAX_RETRIES = 3
+		local attempts = 0
+		local rejoining = false
+
+		local function go()
+			attempts += 1
+			local alone = #Players:GetPlayers() <= 1
+			local ok, err = pcall(function()
+				if alone then
+					TeleportService:Teleport(placeId, player)
+				else
+					TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+				end
+			end)
+			if not ok then
+				warn("Rejoin failed: " .. tostring(err))
+				if attempts < MAX_RETRIES then
+					task.wait(1)
+					return go()
+				end
+				rejoining = false
+				rejoinBtn.Text = "REJOIN"
+				setStatus("Rejoin failed", C.err)
+			end
+		end
+
+		TeleportService.TeleportInitFailed:Connect(function()
+			if not rejoining then return end
+			if attempts < MAX_RETRIES then
+				task.wait(1)
+				go()
+			else
+				rejoining = false
+				rejoinBtn.Text = "REJOIN"
+				setStatus("Rejoin failed", C.err)
+			end
+		end)
+
+		rejoinBtn.MouseButton1Click:Connect(function()
+			if rejoining then return end
+			rejoining = true
+			attempts = 0
+			rejoinBtn.Text = "REJOINING..."
+			setStatus("Rejoining...", C.ok)
+			task.spawn(go)
+		end)
+	end
+
 	-- Walk speed
 	do
 		local card, head = makeCard(right, "Walk speed")
@@ -2117,6 +2569,40 @@ do
 		local card, head = makeCard(left, "Click teleport")
 		addSwitch(head, "clickTp", function(on) setClickTp(on) end)
 		addHint(card, "When on, left click anywhere in the world to teleport there. When off, left click does nothing special.")
+	end
+
+	-- UGC emote (loads an outside emote menu script)
+	do
+		local card = makeCard(left, "UGC emote")
+		addHint(card, "Opens the UGC emote menu. Press it again to load a fresh copy.")
+		local emoteBtn = makeButton(card, "UGC EMOTE", "primary", 12)
+		emoteBtn.Name = "UgcEmoteButton"
+		emoteBtn.Size = UDim2.new(1, 0, 0, 34)
+		emoteBtn.LayoutOrder = nextOrder(card)
+
+		local EMOTE_URL = "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"
+		local loadingEmote = false
+
+		emoteBtn.MouseButton1Click:Connect(function()
+			if loadingEmote then return end
+			loadingEmote = true
+			emoteBtn.Text = "LOADING..."
+			setStatus("Loading UGC emote...", C.ok)
+
+			task.spawn(function()
+				local ok, err = pcall(function()
+					loadstring(game:HttpGet(EMOTE_URL))()
+				end)
+				if ok then
+					setStatus("UGC emote loaded", C.ok)
+				else
+					warn("UGC emote failed: " .. tostring(err))
+					setStatus("UGC emote failed to load", C.err)
+				end
+				emoteBtn.Text = "UGC EMOTE"
+				loadingEmote = false
+			end)
+		end)
 	end
 
 	-- Fly
@@ -2256,7 +2742,7 @@ local function paintTabs(name)
 		local active = (key == name)
 		tween(btn, 0.2, {
 			BackgroundTransparency = active and 0 or 1,
-			TextColor3 = active and C.gold or C.muted,
+			TextColor3 = active and C.mint or C.muted,
 		})
 		local s = btn:FindFirstChild("Stroke")
 		if s then tween(s, 0.2, {Transparency = active and 0 or 1}) end
@@ -2277,7 +2763,10 @@ local function switchTab(name)
 	showPage.Visible = true
 	tween(showPage, 0.35, {Position = PAGE_POS})
 
-	if name == "Friends" then refreshFriends() end
+	if name == "Friends" then
+		refreshFriends()
+		if os.clock() - lastFetch >= 20 then task.spawn(fetchOnlineFriends, true) end
+	end
 	updateUI()
 end
 
@@ -2296,13 +2785,15 @@ local function setMinimized(state)
 	if state then
 		content.Visible = false
 		banner.Visible = false
-		tween(main, 0.35, {Size = MINI_SIZE}, Enum.EasingStyle.Back)
+		footer.Visible = false
+		tween(main, 0.35, {Size = UDim2.fromOffset(fullSize.X.Offset, 40)}, Enum.EasingStyle.Back)
 	else
-		tween(main, 0.4, {Size = FULL_SIZE}, Enum.EasingStyle.Back)
+		tween(main, 0.4, {Size = fullSize}, Enum.EasingStyle.Back)
 		task.delay(0.15, function()
 			if not minimized then
 				content.Visible = true
 				banner.Visible = true
+				footer.Visible = true
 			end
 		end)
 	end
@@ -2310,8 +2801,9 @@ end
 
 minBtn.MouseButton1Click:Connect(function() setMinimized(not minimized) end)
 
-local visible = true
+visible = true
 local function setVisible(state)
+	if not ready then return end
 	visible = state
 	if state then
 		main.Visible = true
@@ -2371,6 +2863,174 @@ do
 	end)
 end
 
--- Intro pop-in
-updateUI()
-tween(mainScale, 0.6, {Scale = 1}, Enum.EasingStyle.Back)
+--------------------------------------------------------------------
+-- Resizing (drag the grip in the bottom right corner)
+--------------------------------------------------------------------
+do
+	local MIN_W, MIN_H, MAX_W, MAX_H = 580, 380, 1000, 720
+
+	local grip = Instance.new("TextButton")
+	grip.Name = "ResizeGrip"
+	grip.AnchorPoint = Vector2.new(1, 0.5)
+	grip.Position = UDim2.new(1, -6, 0.5, 0)
+	grip.Size = UDim2.fromOffset(24, 24)
+	grip.BackgroundTransparency = 1
+	grip.Text = ""
+	grip.AutoButtonColor = false
+	grip.ZIndex = 5
+	grip.Parent = footer
+
+	-- three little dots in a corner shape
+	local dots = {}
+	for _, d in ipairs({{16, 16}, {10, 16}, {16, 10}, {4, 16}, {10, 10}, {16, 4}}) do
+		local dot = Instance.new("Frame")
+		dot.Position = UDim2.fromOffset(d[1], d[2])
+		dot.Size = UDim2.fromOffset(3, 3)
+		dot.BackgroundColor3 = C.faint
+		dot.BorderSizePixel = 0
+		dot.Parent = grip
+		corner(dot, 2)
+		table.insert(dots, dot)
+	end
+	local function tintDots(col)
+		for _, d in ipairs(dots) do tween(d, 0.12, {BackgroundColor3 = col}) end
+	end
+	grip.MouseEnter:Connect(function() tintDots(C.mint) end)
+	grip.MouseLeave:Connect(function() tintDots(C.faint) end)
+
+	local resizing, startMouse, startW, startH, startPos
+	grip.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			resizing = true
+			startMouse = input.Position
+			startW, startH = fullSize.X.Offset, fullSize.Y.Offset
+			startPos = main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					resizing = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if resizing and not minimized
+			and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+			local scale = math.max(mainScale.Scale, 0.1)
+			local d = (input.Position - startMouse) / scale
+			local w = math.clamp(startW + d.X, MIN_W, MAX_W)
+			local h = math.clamp(startH + d.Y, MIN_H, MAX_H)
+			fullSize = UDim2.fromOffset(w, h)
+			main.Size = fullSize
+			-- main is centered on its position, so shift by half the change
+			-- to keep the top-left corner where it is
+			main.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + (w - startW) / 2,
+				startPos.Y.Scale, startPos.Y.Offset + (h - startH) / 2
+			)
+		end
+	end)
+end
+
+--------------------------------------------------------------------
+-- Loading bar, then the panel pops in
+--------------------------------------------------------------------
+task.spawn(function()
+	local box = Instance.new("CanvasGroup")
+	box.Name = "Loader"
+	box.AnchorPoint = Vector2.new(0.5, 0.5)
+	box.Position = UDim2.fromScale(0.5, 0.5)
+	box.Size = UDim2.fromOffset(300, 92)
+	box.BackgroundColor3 = C.card
+	box.BorderSizePixel = 0
+	box.GroupTransparency = 1
+	box.Parent = gui
+	corner(box, 10)
+	stroke(box, C.cardStroke, 1, 0)
+
+	local boxScale = Instance.new("UIScale")
+	boxScale.Scale = 0.92
+	boxScale.Parent = box
+
+	label(box, {
+		Text = "KRHUB",
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(20, 12),
+		Size = UDim2.new(1, -40, 0, 22),
+	})
+	local stage = label(box, {
+		Text = "Starting",
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(20, 36),
+		Size = UDim2.new(1, -90, 0, 16),
+	})
+	local pct = label(box, {
+		Text = "0%",
+		Font = Enum.Font.GothamBold,
+		TextSize = 11,
+		TextColor3 = C.mint,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Position = UDim2.new(1, -70, 0, 36),
+		Size = UDim2.fromOffset(50, 16),
+	})
+
+	local track = Instance.new("Frame")
+	track.Position = UDim2.fromOffset(20, 64)
+	track.Size = UDim2.new(1, -40, 0, 4)
+	track.BackgroundColor3 = C.field
+	track.BorderSizePixel = 0
+	track.Parent = box
+	corner(track, 2)
+
+	local fill = Instance.new("Frame")
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.BackgroundColor3 = C.mint
+	fill.BorderSizePixel = 0
+	fill.Parent = track
+	corner(fill, 2)
+
+	-- one NumberValue drives the bar and the percentage so they stay in sync
+	local progress = Instance.new("NumberValue")
+	progress.Changed:Connect(function(v)
+		fill.Size = UDim2.fromScale(v, 1)
+		pct.Text = math.floor(v * 100 + 0.5) .. "%"
+	end)
+
+	tween(box, 0.25, {GroupTransparency = 0})
+	tween(boxScale, 0.3, {Scale = 1})
+	task.wait(0.25)
+
+	local steps = {
+		{"Loading interface", 0.35, 0.8},
+		{"Checking friends",  0.75, 0.9},
+		{"Almost ready",      1.0, 0.8},
+	}
+	for i, step in ipairs(steps) do
+		stage.Text = step[1]
+		if i == 2 then
+			task.spawn(function() pcall(fetchOnlineFriends, true) end)
+		end
+		local tw = tween(progress, step[3], {Value = step[2]}, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+		tw.Completed:Wait()
+	end
+
+	task.wait(0.15)
+	local out = tween(box, 0.25, {GroupTransparency = 1})
+	tween(boxScale, 0.25, {Scale = 0.94})
+	out.Completed:Wait()
+	box:Destroy()
+	progress:Destroy()
+
+	ready = true
+	visible = true
+	main.Visible = true
+	updateUI()
+	tween(mainScale, 0.5, {Scale = 1}, Enum.EasingStyle.Back)
+end)
