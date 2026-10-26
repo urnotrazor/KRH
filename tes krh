@@ -489,7 +489,7 @@ local content = Instance.new("Frame")
 content.Name = "Content"
 content.BackgroundTransparency = 1
 content.Position = UDim2.fromOffset(0, 70)
-content.Size = UDim2.new(1, 0, 1, -142)
+content.Size = UDim2.new(1, 0, 1, -122)
 content.Parent = main
 
 -- Footer: your avatar + name (bottom left) and the resize grip (bottom right)
@@ -497,7 +497,7 @@ local footer = Instance.new("Frame")
 footer.Name = "Footer"
 footer.AnchorPoint = Vector2.new(0, 1)
 footer.Position = UDim2.new(0, 0, 1, 0)
-footer.Size = UDim2.new(1, 0, 0, 72)
+footer.Size = UDim2.new(1, 0, 0, 52)
 footer.BackgroundColor3 = C.bar
 footer.BorderSizePixel = 0
 footer.Parent = main
@@ -508,35 +508,56 @@ footerLine.BackgroundColor3 = C.cardStroke
 footerLine.BorderSizePixel = 0
 footerLine.Parent = footer
 
+-- Profile chip: one rounded pill holding avatar + names
+local chip = Instance.new("Frame")
+chip.Name = "ProfileChip"
+chip.Position = UDim2.fromOffset(12, 8)
+chip.Size = UDim2.fromOffset(230, 36)
+chip.BackgroundColor3 = C.field
+chip.BorderSizePixel = 0
+chip.Parent = footer
+corner(chip, 18)
+stroke(chip, C.cardStroke, 1, 0)
+
 local meAvatar = Instance.new("ImageLabel")
 meAvatar.Name = "MyAvatar"
-meAvatar.Position = UDim2.fromOffset(14, 8)
-meAvatar.Size = UDim2.fromOffset(56, 56)
-meAvatar.BackgroundColor3 = C.field
+meAvatar.Position = UDim2.fromOffset(3, 3)
+meAvatar.Size = UDim2.fromOffset(30, 30)
+meAvatar.BackgroundColor3 = C.card
 meAvatar.BorderSizePixel = 0
 meAvatar.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100"):format(player.UserId)
-meAvatar.Parent = footer
-corner(meAvatar, 28)
-stroke(meAvatar, C.goldLine, 2, 0)
+meAvatar.Parent = chip
+corner(meAvatar, 15)
 
-label(footer, {
+-- little green "online" dot on the avatar
+local dot = Instance.new("Frame")
+dot.Position = UDim2.fromOffset(25, 25)
+dot.Size = UDim2.fromOffset(9, 9)
+dot.BackgroundColor3 = C.mint
+dot.BorderSizePixel = 0
+dot.ZIndex = 3
+dot.Parent = chip
+corner(dot, 5)
+stroke(dot, C.field, 2, 0)
+
+label(chip, {
 	Text = player.DisplayName,
 	Font = Enum.Font.GothamBold,
-	TextSize = 16,
+	TextSize = 12,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(82, 15),
-	Size = UDim2.new(0.5, -96, 0, 20),
+	Position = UDim2.fromOffset(42, 4),
+	Size = UDim2.new(1, -54, 0, 16),
 })
-label(footer, {
+label(chip, {
 	Text = "@" .. player.Name,
 	Font = Enum.Font.Gotham,
-	TextSize = 12,
+	TextSize = 10,
 	TextColor3 = C.muted,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	TextTruncate = Enum.TextTruncate.AtEnd,
-	Position = UDim2.fromOffset(82, 37),
-	Size = UDim2.new(0.5, -96, 0, 16),
+	Position = UDim2.fromOffset(42, 19),
+	Size = UDim2.new(1, -54, 0, 13),
 })
 
 local function updatePlayerCount()
