@@ -2478,8 +2478,10 @@ do
 		BloomEffect = true, DepthOfFieldEffect = true,
 	}
 
-	local origProps = {}                                -- [prop] = value before we touched it
-	local savedInst = setmetatable({}, {__mode = "k"})  -- [Atmosphere / effect] = original values
+	-- originals of everything we change (strong references on purpose,
+	-- so every single one can be put back)
+	local origProps = {}   -- [prop] = value
+	local savedInst = {}   -- [Atmosphere / effect] = {original values}
 	local conn, acc = nil, 0
 
 	local function applyProps()
@@ -2488,38 +2490,38 @@ do
 		end
 	end
 
+	-- looks through everything inside Lighting and the camera (including folders)
 	local function applyInstances()
-		for _, parent in ipairs({Lighting, workspace.CurrentCamera}) do
-			if parent then
-				for _, c in ipairs(parent:GetChildren()) do
-					if c:IsA("Atmosphere") then
-						if not savedInst[c] then savedInst[c] = {Density = c.Density, Haze = c.Haze} end
-						if c.Density ~= 0 then c.Density = 0 end
-						if c.Haze ~= 0 then c.Haze = 0 end
-					elseif EFFECTS[c.ClassName] then
-						if not savedInst[c] then savedInst[c] = {Enabled = c.Enabled} end
-						if c.Enabled then c.Enabled = false end
-					end
+		local roots = {Lighting}
+		if workspace.CurrentCamera then table.insert(roots, workspace.CurrentCamera) end
+		for _, root in ipairs(roots) do
+			for _, c in ipairs(root:GetDescendants()) do
+				if c:IsA("Atmosphere") then
+					if not savedInst[c] then savedInst[c] = {Density = c.Density, Haze = c.Haze} end
+					if c.Density ~= 0 then c.Density = 0 end
+					if c.Haze ~= 0 then c.Haze = 0 end
+				elseif EFFECTS[c.ClassName] then
+					if not savedInst[c] then savedInst[c] = {Enabled = c.Enabled} end
+					if c.Enabled then c.Enabled = false end
 				end
 			end
 		end
 	end
 
-	local function restore()
-		for prop, value in pairs(origProps) do
-			Lighting[prop] = value
+	local function putBack(props, insts)
+		for prop, value in pairs(props) do
+			pcall(function() Lighting[prop] = value end)
 		end
-		table.clear(origProps)
-		for c, v in pairs(savedInst) do
-			if c.Parent then
+		for c, v in pairs(insts) do
+			pcall(function()
 				if v.Enabled ~= nil then
 					c.Enabled = v.Enabled
 				else
-					c.Density, c.Haze = v.Density, v.Haze
+					c.Density = v.Density
+					c.Haze = v.Haze
 				end
-			end
+			end)
 		end
-		table.clear(savedInst)
 	end
 
 	setFullbright = function(state)
@@ -2546,7 +2548,14 @@ do
 			end)
 		else
 			if conn then conn:Disconnect() conn = nil end
-			restore()
+			-- take the saved originals, then put them back right now and once more
+			-- a moment later in case the game's own scripts changed things in between
+			local props, insts = origProps, savedInst
+			origProps, savedInst = {}, {}
+			putBack(props, insts)
+			task.delay(0.3, function()
+				if not fullbrightOn then putBack(props, insts) end
+			end)
 		end
 
 		if updateUI then updateUI() end
