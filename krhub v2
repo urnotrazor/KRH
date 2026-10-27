@@ -7,7 +7,7 @@
 	             TELEPORT, SPECTATE and ESP buttons for that person.
 	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
 	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed,
-	             fullbright, no fog, no shadows, no effects.
+	             fullbright (also removes fog, shadows, effects).
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
 	  Settings - change the command bar key.
@@ -2561,6 +2561,11 @@ do
 	end
 
 	setLight = function(flag, state)
+		if flag == "all" then
+			-- the single Fullbright switch: all four options together
+			for _, f in ipairs({"fb", "fog", "shadow", "fx"}) do setLight(f, state) end
+			return
+		end
 		if LIGHT[flag] == nil or LIGHT[flag] == state then return end
 		LIGHT[flag] = state
 		if state then
@@ -2622,15 +2627,8 @@ do
 	-- Fullbright
 	do
 		local card, head = makeCard(left, "Fullbright")
-		addSwitch(head, "light_fb", function(on) setLight("fb", on) end)
-		addHint(card, "Bright daylight and even lighting everywhere, including dark places.")
-	end
-
-	-- No fog
-	do
-		local card, head = makeCard(left, "No fog")
-		addSwitch(head, "light_fog", function(on) setLight("fog", on) end)
-		addHint(card, "Removes fog and haze so you can see far away.")
+		addSwitch(head, "light_fb", function(on) setLight("all", on) end)
+		addHint(card, "Bright daylight everywhere, and removes fog, shadows, blur and color effects. Turn it off to put the lighting back how the game had it.")
 	end
 
 	-- Freecam
@@ -2649,20 +2647,6 @@ do
 			if on ~= antiAfkOn then setAntiAfk(on) end
 		end)
 		addHint(card, "Stops you from being kicked for idling.")
-	end
-
-	-- No shadows
-	do
-		local card, head = makeCard(right, "No shadows")
-		addSwitch(head, "light_shadow", function(on) setLight("shadow", on) end)
-		addHint(card, "Turns off global shadows.")
-	end
-
-	-- No post effects
-	do
-		local card, head = makeCard(right, "No effects")
-		addSwitch(head, "light_fx", function(on) setLight("fx", on) end)
-		addHint(card, "Turns off blur, color correction, bloom, sun rays and depth of field.")
 	end
 
 	-- Rejoin (a plain button, not a switch)
@@ -2865,9 +2849,6 @@ updateUI = function()
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
 	sw("light_fb", LIGHT.fb)
-	sw("light_fog", LIGHT.fog)
-	sw("light_shadow", LIGHT.shadow)
-	sw("light_fx", LIGHT.fx)
 
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
@@ -3127,7 +3108,7 @@ end
 		"spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
 		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
-			"fullbright  nofog  noshadows  nofx  (on|off)",
+			"fullbright  (on|off)",
 		"speed <number|reset>  ·  flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
@@ -3405,13 +3386,7 @@ end)()
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return LIGHT.fb end,
-		function(v) setLight("fb", v) end, "Fullbright")
-	boolCommand("nofog", "nofog", function() return LIGHT.fog end,
-		function(v) setLight("fog", v) end, "No fog")
-	boolCommand("noshadows", "noshadows", function() return LIGHT.shadow end,
-		function(v) setLight("shadow", v) end, "No shadows")
-	boolCommand("nofx", "nofx", function() return LIGHT.fx end,
-		function(v) setLight("fx", v) end, "No effects")
+		function(v) setLight("all", v) end, "Fullbright")
 
 	add({
 		name = "speed", usage = "speed <number|reset>",
