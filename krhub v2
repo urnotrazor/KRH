@@ -9,6 +9,9 @@
 	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed.
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
+	  Settings - change the command bar key.
+
+	Command bar: press ; (rebindable) and type goto <name>, esp on, fly, ...
 
 	Controls:
 	  - Enter in the box teleports to the matched player
@@ -301,8 +304,10 @@ end
 --------------------------------------------------------------------
 -- GUI shell
 --------------------------------------------------------------------
+do
 local old = playerGui:FindFirstChild("TeleportGui")
 if old then old:Destroy() end
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "TeleportGui"
@@ -336,18 +341,21 @@ titleBar.BorderSizePixel = 0
 titleBar.Parent = main
 corner(titleBar, 10)
 
+do
 local titlePatch = Instance.new("Frame")
 titlePatch.Size = UDim2.new(1, 0, 0, 12)
 titlePatch.Position = UDim2.new(0, 0, 1, -12)
 titlePatch.BackgroundColor3 = C.bar
 titlePatch.BorderSizePixel = 0
 titlePatch.Parent = titleBar
+end
 
 label(titleBar, {
 	Text = "KRHUB",
 	Font = Enum.Font.GothamBold,
 	TextSize = 14,
-	Size = UDim2.fromScale(1, 1),
+	TextXAlignment = Enum.TextXAlignment.Right,
+	Size = UDim2.new(1, -84, 1, 0),
 })
 
 local function titleButton(text, xOffset)
@@ -380,11 +388,12 @@ local closeBtn = titleButton("×", -38)
 -- Tab buttons (left side of the title bar). Active tab = gold text on a
 -- dark gold pill with a thin gold outline (like the icon tabs in the reference).
 local TAB_DEFS = {
-	{key = "Normal",  text = "Teleport", width = 66},
-	{key = "Friends", text = "Friends",  width = 58},
-	{key = "All",     text = "Misc",     width = 46},
-	{key = "Tools",   text = "Tools",    width = 50},
-	{key = "VC",      text = "VC",       width = 38},
+	{key = "Normal",   text = "Teleport", width = 62},
+	{key = "Friends",  text = "Friends",  width = 54},
+	{key = "All",      text = "Misc",     width = 42},
+	{key = "Tools",    text = "Tools",    width = 46},
+	{key = "VC",       text = "VC",       width = 34},
+	{key = "Settings", text = "Settings", width = 58},
 }
 local TAB_BUTTONS = {}
 local currentTab = "Normal"
@@ -429,12 +438,14 @@ banner.BackgroundColor3 = C.goldBg
 banner.BorderSizePixel = 0
 banner.Parent = main
 
+do
 local bannerLine = Instance.new("Frame")
 bannerLine.Position = UDim2.new(0, 0, 1, -1)
 bannerLine.Size = UDim2.new(1, 0, 0, 1)
 bannerLine.BackgroundColor3 = C.goldLine
 bannerLine.BorderSizePixel = 0
 bannerLine.Parent = banner
+end
 
 local playerCount = label(banner, {
 	Text = "Players: 0",
@@ -502,6 +513,7 @@ footer.BackgroundColor3 = C.bar
 footer.BorderSizePixel = 0
 footer.Parent = main
 
+do
 local footerLine = Instance.new("Frame")
 footerLine.Size = UDim2.new(1, 0, 0, 1)
 footerLine.BackgroundColor3 = C.cardStroke
@@ -559,6 +571,7 @@ label(chip, {
 	Position = UDim2.fromOffset(42, 19),
 	Size = UDim2.new(1, -54, 0, 13),
 })
+end
 
 local function updatePlayerCount()
 	playerCount.Text = ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers)
@@ -858,9 +871,11 @@ end
 --------------------------------------------------------------------
 -- Anti-AFK
 --------------------------------------------------------------------
+local antiAfkOn = false
+local setAntiAfk
+do
 local VirtualUser = game:GetService("VirtualUser")
 
-local antiAfkOn     = false
 local antiAfkConn   = nil
 local antiAfkStored = {}   -- other Idled connections we paused
 local antiAfkMode   = nil  -- "VirtualUser" or "VIM"
@@ -938,7 +953,7 @@ local function enableAntiAfk()
 	return true
 end
 
-local function setAntiAfk(state)
+setAntiAfk = function(state)
 	if state then
 		if enableAntiAfk() then
 			antiAfkOn = true
@@ -954,13 +969,16 @@ local function setAntiAfk(state)
 	end
 	if updateUI then updateUI() end
 end
+end
 
 --------------------------------------------------------------------
 -- Freecam
 --------------------------------------------------------------------
+local freecamOn = false
+local startFreecam, toggleFreecam
+do
 local FC_MIN, FC_MAX = 5, 300
 local fcSpeed = 50
-local freecamOn = false
 local fcConn
 local fcPos = Vector3.zero
 local fcPitch, fcYaw = 0, 0
@@ -973,7 +991,7 @@ local function getControls()
 	return ok and controls or nil
 end
 
-local function startFreecam()
+startFreecam = function()
 	if freecamOn then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
@@ -1054,7 +1072,7 @@ stopFreecam = function(silent)
 	if not silent then setStatus("Freecam off", C.muted) end
 end
 
-local function toggleFreecam()
+toggleFreecam = function()
 	if freecamOn then stopFreecam() else startFreecam() end
 end
 
@@ -1065,6 +1083,7 @@ UserInputService.InputChanged:Connect(function(input, processed)
 		setStatus("Freecam speed: " .. math.floor(fcSpeed + 0.5), C.muted)
 	end
 end)
+end
 
 --------------------------------------------------------------------
 -- Walk speed
@@ -1795,9 +1814,10 @@ local friendsPage = newPage(false)
 local allPage     = newPage(false)
 local toolsPage   = newPage(false)
 local vcPage      = newPage(false)
+local settingsPage = newPage(false)
 
 -- Page: Teleport (input + player card) -------------------------------
-do
+;(function()
 	local left  = makeColumn(normalPage, "left")
 	local right = makeColumn(normalPage, "right")
 
@@ -1966,7 +1986,7 @@ do
 	cardEspBtn.MouseButton1Click:Connect(function()
 		toggleEsp(currentMatch)
 	end)
-end
+end)()
 
 -- Page: Friends --------------------------------------------------------
 -- Left : friends in this server (TP / SPECTATE / ESP)
@@ -1979,6 +1999,28 @@ local sameRefreshBtn, updatedLabel
 local rebuildOnlineLists          -- defined after the GUI (needs join logic)
 local fetchOnlineFriends          -- same
 local ready = false   -- becomes true when the loading bar is done
+local doRejoin, doEmote                 -- filled in by the Misc / Tools cards
+local speedSliderApi, flySliderApi      -- so commands can move the sliders too
+local toggleCommandBar                  -- filled in by the command bar
+local cmdKey = Enum.KeyCode.Semicolon   -- key that opens the command bar (rebindable)
+local SETTINGS_FILE = "KRHUB_settings.json"
+do
+	pcall(function()
+		if isfile and readfile and isfile(SETTINGS_FILE) then
+			local data = game:GetService("HttpService"):JSONDecode(readfile(SETTINGS_FILE))
+			local code = data and data.commandKey and Enum.KeyCode[data.commandKey]
+			if code then cmdKey = code end
+		end
+	end)
+end
+local function saveSettings()
+	pcall(function()
+		if writefile then
+			writefile(SETTINGS_FILE, game:GetService("HttpService"):JSONEncode({commandKey = cmdKey.Name}))
+		end
+	end)
+end
+local capturingKey = false              -- true while the Settings tab waits for a key
 local visible = true  -- GUI shown? (also used by the friend auto-refresh)
 local TeleportService = game:GetService("TeleportService")
 
@@ -2518,14 +2560,15 @@ do
 			end
 		end)
 
-		rejoinBtn.MouseButton1Click:Connect(function()
+		doRejoin = function()
 			if rejoining then return end
 			rejoining = true
 			attempts = 0
 			rejoinBtn.Text = "REJOINING..."
 			setStatus("Rejoining...", C.ok)
 			task.spawn(go)
-		end)
+		end
+		rejoinBtn.MouseButton1Click:Connect(doRejoin)
 	end
 
 	-- Walk speed
@@ -2536,6 +2579,7 @@ do
 			function(v) setSpeed(v) end,
 			function() setStatus("Walk speed: " .. tostring(customSpeed), C.ok) end
 		)
+		speedSliderApi = slider
 		local resetBtn = makeButton(card, "RESET WALK SPEED", "ghost", 12)
 		resetBtn.Name = "ResetSpeedButton"
 		resetBtn.Size = UDim2.new(1, 0, 0, 34)
@@ -2583,7 +2627,7 @@ do
 		local EMOTE_URL = "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"
 		local loadingEmote = false
 
-		emoteBtn.MouseButton1Click:Connect(function()
+		doEmote = function()
 			if loadingEmote then return end
 			loadingEmote = true
 			emoteBtn.Text = "LOADING..."
@@ -2602,7 +2646,8 @@ do
 				emoteBtn.Text = "UGC EMOTE"
 				loadingEmote = false
 			end)
-		end)
+		end
+		emoteBtn.MouseButton1Click:Connect(doEmote)
 	end
 
 	-- Fly
@@ -2627,7 +2672,7 @@ do
 			Size = UDim2.new(1, -90, 1, 0),
 		})
 		local flyBox = makeValueBox(speedRow, tostring(flySpeed), "st/s")
-		makeSlider(card, right, 10, 300, flySpeed, flyBox, function(v)
+		flySliderApi = makeSlider(card, right, 10, 300, flySpeed, flyBox, function(v)
 			flySpeed = v
 		end)
 	end
@@ -2734,8 +2779,8 @@ refreshFriends()
 --------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5, Settings = 6}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage, Settings = settingsPage}
 
 local function paintTabs(name)
 	for key, btn in pairs(TAB_BUTTONS) do
@@ -2823,13 +2868,715 @@ closeBtn.MouseButton1Click:Connect(function()
 end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
-	if processed then return end
+	if processed or capturingKey then return end
 	if input.KeyCode == Enum.KeyCode.K then
 		setVisible(not visible)
 	elseif input.KeyCode == Enum.KeyCode.P then
 		toggleFreecam()
+	elseif input.KeyCode == cmdKey and toggleCommandBar then
+		toggleCommandBar()
 	end
 end)
+
+
+--------------------------------------------------------------------
+-- Settings tab (rebind the command bar key)
+--------------------------------------------------------------------
+local function keyName(code)
+	local ok, str = pcall(function()
+		return UserInputService:GetStringForKeyCode(code)
+	end)
+	if ok and type(str) == "string" and str ~= "" then return str:upper() end
+	return code.Name
+end
+
+;(function()
+	local left  = makeColumn(settingsPage, "left")
+	local right = makeColumn(settingsPage, "right")
+
+	local card = makeCard(left, "Command bar key")
+	addHint(card, "Press this key anywhere in the game to open the command bar. Click the key below, then press the new key. Esc cancels.")
+
+	local keyBtn = makeButton(card, keyName(cmdKey), "ghost", 15)
+	keyBtn.Name = "CommandKeyButton"
+	keyBtn.Size = UDim2.new(1, 0, 0, 40)
+	keyBtn.LayoutOrder = nextOrder(card)
+
+	local captureConn
+	local function finishCapture()
+		if captureConn then captureConn:Disconnect() captureConn = nil end
+		-- clear on the next step so the key that was just pressed doesn't also trigger its action
+		task.defer(function() capturingKey = false end)
+		keyBtn.Text = keyName(cmdKey)
+		keyBtn:SetAttribute("base", C.field)
+		tween(keyBtn, 0.2, {TextColor3 = C.text})
+		local st = keyBtn:FindFirstChild("Stroke")
+		if st then tween(st, 0.2, {Color = C.cardStroke}) end
+	end
+
+	local RESERVED = {
+		[Enum.KeyCode.K] = true, [Enum.KeyCode.P] = true,
+		[Enum.KeyCode.Return] = true, [Enum.KeyCode.Tab] = true,
+		[Enum.KeyCode.Backspace] = true, [Enum.KeyCode.Space] = true,
+	}
+
+	keyBtn.MouseButton1Click:Connect(function()
+		if capturingKey then
+			finishCapture()
+			return
+		end
+		capturingKey = true
+		keyBtn.Text = "Press a key..."
+		keyBtn:SetAttribute("base", C.goldBg)
+		tween(keyBtn, 0.2, {TextColor3 = C.mint})
+		local st = keyBtn:FindFirstChild("Stroke")
+		if st then tween(st, 0.2, {Color = C.mint}) end
+
+		captureConn = UserInputService.InputBegan:Connect(function(input)
+			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+			if input.KeyCode == Enum.KeyCode.Escape then
+				finishCapture()
+				setStatus("Key change cancelled", C.muted)
+			elseif input.KeyCode == Enum.KeyCode.Unknown then
+				return
+			elseif RESERVED[input.KeyCode] then
+				setStatus(keyName(input.KeyCode) .. " is reserved, pick another key", C.err)
+			else
+				cmdKey = input.KeyCode
+				saveSettings()
+				finishCapture()
+				setStatus("Command bar key: " .. keyName(cmdKey), C.ok)
+			end
+		end)
+	end)
+
+	local resetBtn = makeButton(card, "RESET TO ;", "ghost", 11)
+	resetBtn.Size = UDim2.new(1, 0, 0, 30)
+	resetBtn.LayoutOrder = nextOrder(card)
+	resetBtn.MouseButton1Click:Connect(function()
+		if capturingKey then finishCapture() end
+		cmdKey = Enum.KeyCode.Semicolon
+		saveSettings()
+		keyBtn.Text = keyName(cmdKey)
+		setStatus("Command bar key: ;", C.muted)
+	end)
+
+	addHint(card, "Your key is remembered between runs when your executor supports saving files.")
+
+	local ref = makeCard(right, "Commands")
+	addHint(ref, table.concat({
+		"goto <player>",
+		"spectate <player>  ·  unspectate",
+		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
+		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
+		"speed <number|reset>  ·  flyspeed <number>",
+		"join <friend>  ·  rejoin  ·  emote",
+		"tab <name>  ·  show  ·  hide",
+		"",
+		"Tab = autocomplete   Up / Down = choose   Enter = run",
+	}, "\n"))
+end)()
+
+--------------------------------------------------------------------
+-- Command bar
+--------------------------------------------------------------------
+;(function()
+	local CMD_W, ROW_H, MAX_SUGG = 460, 28, 6
+	local REST = UDim2.new(0.5, 0, 1, -72)       -- where the bar sits
+	local LOW  = UDim2.new(0.5, 0, 1, -72 + 16)  -- where it slides up from
+
+	local cmdOpen, cmdBusy = false, false
+	local openedAt = 0
+	local suggList, selIdx, viewStart = {}, 1, 1
+
+	-- UI -----------------------------------------------------------
+	local root = Instance.new("CanvasGroup")
+	root.Name = "CommandBar"
+	root.AnchorPoint = Vector2.new(0.5, 1)
+	root.Position = LOW
+	root.Size = UDim2.fromOffset(CMD_W, 44 + 8 + MAX_SUGG * ROW_H + 8)
+	root.BackgroundTransparency = 1
+	root.GroupTransparency = 1
+	root.Visible = false
+	root.ZIndex = 5
+	root.Parent = gui
+
+	local bar = Instance.new("Frame")
+	bar.Name = "InputBar"
+	bar.AnchorPoint = Vector2.new(0, 1)
+	bar.Position = UDim2.new(0, 0, 1, 0)
+	bar.Size = UDim2.new(1, 0, 0, 44)
+	bar.BackgroundColor3 = C.card
+	bar.BorderSizePixel = 0
+	bar.Parent = root
+	corner(bar, 10)
+	stroke(bar, C.goldLine, 1, 0)
+
+	label(bar, {
+		Text = ">",
+		Font = Enum.Font.GothamBold,
+		TextSize = 16,
+		TextColor3 = C.mint,
+		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.fromOffset(16, 44),
+	})
+
+	local TEXT_POS  = UDim2.fromOffset(34, 0)
+	local TEXT_SIZE = UDim2.new(1, -34 - 112, 1, 0)
+
+	local ghost = label(bar, {
+		Text = "",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 15,
+		TextColor3 = C.faint,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = TEXT_POS,
+		Size = TEXT_SIZE,
+	})
+
+	local box = Instance.new("TextBox")
+	box.Name = "CommandInput"
+	box.BackgroundTransparency = 1
+	box.BorderSizePixel = 0
+	box.Position = TEXT_POS
+	box.Size = TEXT_SIZE
+	box.Font = Enum.Font.GothamMedium
+	box.TextSize = 15
+	box.TextColor3 = C.text
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.ClearTextOnFocus = false
+	box.PlaceholderText = "Type a command...  goto, esp, fly"
+	box.PlaceholderColor3 = C.faint
+	box.Text = ""
+	box.Parent = bar
+
+	local hint = label(bar, {
+		Text = "TAB  complete",
+		Font = Enum.Font.GothamBold,
+		TextSize = 10,
+		TextColor3 = C.faint,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -12, 0, 0),
+		Size = UDim2.fromOffset(100, 44),
+	})
+
+	local feedback = label(bar, {
+		Text = "",
+		Font = Enum.Font.GothamBold,
+		TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = TEXT_POS,
+		Size = UDim2.new(1, -34 - 14, 1, 0),
+		Visible = false,
+	})
+
+	-- suggestion panel (sits above the bar)
+	local sugg = Instance.new("Frame")
+	sugg.Name = "Suggestions"
+	sugg.AnchorPoint = Vector2.new(0, 1)
+	sugg.Position = UDim2.new(0, 0, 1, -52)
+	sugg.Size = UDim2.new(1, 0, 0, 0)
+	sugg.BackgroundColor3 = C.card
+	sugg.BorderSizePixel = 0
+	sugg.ClipsDescendants = true
+	sugg.Visible = false
+	sugg.Parent = root
+	corner(sugg, 10)
+	stroke(sugg, C.cardStroke, 1, 0)
+
+	local suggPad = Instance.new("UIPadding")
+	suggPad.PaddingTop, suggPad.PaddingBottom = UDim.new(0, 4), UDim.new(0, 4)
+	suggPad.PaddingLeft, suggPad.PaddingRight = UDim.new(0, 4), UDim.new(0, 4)
+	suggPad.Parent = sugg
+
+	local suggLayout = Instance.new("UIListLayout")
+	suggLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	suggLayout.Parent = sugg
+
+	local rows = {}
+	for i = 1, MAX_SUGG do
+		local f = Instance.new("Frame")
+		f.Size = UDim2.new(1, 0, 0, ROW_H)
+		f.BackgroundColor3 = C.goldBg
+		f.BackgroundTransparency = 1
+		f.BorderSizePixel = 0
+		f.LayoutOrder = i
+		f.Visible = false
+		f.Parent = sugg
+		corner(f, 6)
+		local nameL = label(f, {
+			Text = "", Font = Enum.Font.GothamMedium, TextSize = 13,
+			TextColor3 = C.muted, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(10, 0), Size = UDim2.new(0.5, -10, 1, 0),
+		})
+		local descL = label(f, {
+			Text = "", Font = Enum.Font.Gotham, TextSize = 11,
+			TextColor3 = C.faint, TextXAlignment = Enum.TextXAlignment.Right,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.new(0.5, -10, 1, 0),
+		})
+		rows[i] = {frame = f, name = nameL, desc = descL}
+	end
+
+	-- Commands -----------------------------------------------------
+	local function playerCands()
+		local out = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player then
+				table.insert(out, {
+					text = p.Name,
+					alt = p.DisplayName,
+					desc = (p.DisplayName ~= p.Name) and p.DisplayName or "",
+				})
+			end
+		end
+		table.sort(out, function(a, b) return a.text:lower() < b.text:lower() end)
+		return out
+	end
+
+	local function onOff()
+		return {{text = "on", desc = ""}, {text = "off", desc = ""}}
+	end
+
+	local function parseBool(arg, current)
+		arg = arg:lower()
+		if arg == "" then return not current end
+		if arg == "on" or arg == "true" or arg == "1" or arg == "yes" then return true end
+		if arg == "off" or arg == "false" or arg == "0" or arg == "no" then return false end
+		return nil
+	end
+
+	local function needPlayer(arg, usage)
+		if arg == "" then return nil, usage end
+		local t = findPlayer(arg)
+		if not t then return nil, "No player matching '" .. arg .. "'" end
+		return t
+	end
+
+	local COMMANDS = {}
+	local function add(def) table.insert(COMMANDS, def) end
+
+	local function boolCommand(name, usageName, getter, setter, nice)
+		add({
+			name = name, usage = name .. " on|off",
+			suggest = onOff,
+			run = function(arg)
+				local v = parseBool(arg, getter())
+				if v == nil then return false, "Usage: " .. name .. " on|off" end
+				setter(v)
+				if getter() ~= v then return false, nice .. " couldn't be turned " .. (v and "on" or "off") end
+				return true, nice .. (v and " on" or " off")
+			end,
+		})
+	end
+
+	add({
+		name = "goto", aliases = {"tp"}, usage = "goto <player>",
+		suggest = playerCands,
+		run = function(arg)
+			local t, err = needPlayer(arg, "Usage: goto <player>")
+			if not t then return false, err end
+			local root = t.Character and t.Character:FindFirstChild("HumanoidRootPart")
+			if not root then return false, t.DisplayName .. " has no character" end
+			if busy then return false, "A teleport is in progress" end
+			teleportTo(t)
+			return true, "Teleported to " .. t.DisplayName
+		end,
+	})
+
+	add({
+		name = "spectate", aliases = {"spec", "watch"}, usage = "spectate <player>",
+		suggest = playerCands,
+		run = function(arg)
+			if arg == "" then
+				if spectating then stopSpectating() return true, "Stopped spectating" end
+				return false, "Usage: spectate <player>"
+			end
+			local t, err = needPlayer(arg, "Usage: spectate <player>")
+			if not t then return false, err end
+			if spectating == t then stopSpectating() return true, "Stopped spectating" end
+			startSpectating(t)
+			return true, "Spectating " .. t.DisplayName
+		end,
+	})
+
+	add({
+		name = "unspectate", aliases = {"unspec"}, usage = "unspectate",
+		run = function()
+			if not spectating then return false, "You aren't spectating anyone" end
+			stopSpectating()
+			return true, "Stopped spectating"
+		end,
+	})
+
+	add({
+		name = "esp", usage = "esp on|off|<player>",
+		suggest = function()
+			local list = onOff()
+			for _, c in ipairs(playerCands()) do table.insert(list, c) end
+			return list
+		end,
+		run = function(arg)
+			local a = arg:lower()
+			if a == "on" then setEspAll(true) return true, "ESP on for everyone" end
+			if a == "off" then setEspAll(false) return true, "ESP off for everyone" end
+			local t, err = needPlayer(arg, "Usage: esp on|off|<player>")
+			if not t then return false, err end
+			if espAll then return false, "ESP everyone is on (use: esp off)" end
+			toggleEsp(t)
+			return true, (espOn[t.UserId] and "ESP on for " or "ESP off for ") .. t.DisplayName
+		end,
+	})
+
+	boolCommand("espnames", "espnames", function() return espNames end, setEspNames, "ESP names")
+
+	add({
+		name = "clearesp", usage = "clearesp",
+		run = function() clearAllEsp() return true, "All ESP cleared" end,
+	})
+
+	boolCommand("freecam", "freecam", function() return freecamOn end,
+		function(v) if v then startFreecam() else stopFreecam() end end, "Freecam")
+	boolCommand("noclip", "noclip", function() return noclipOn end, setNoclip, "Noclip")
+	boolCommand("fly", "fly", function() return flyOn end,
+		function(v) if v then startFly() else stopFly() end end, "Fly")
+	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
+	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
+
+	add({
+		name = "speed", usage = "speed <number|reset>",
+		suggest = function() return {{text = "reset", desc = "back to default"}} end,
+		run = function(arg)
+			if arg:lower() == "reset" then
+				customSpeed = nil
+				if speedSliderApi then speedSliderApi.set(SPEED_DEFAULT) end
+				local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+				if hum then hum.WalkSpeed = SPEED_DEFAULT end
+				return true, "Walk speed reset"
+			end
+			local n = tonumber(arg)
+			if not n then return false, "Usage: speed <number|reset>" end
+			setSpeed(n)
+			if speedSliderApi then speedSliderApi.set(customSpeed) end
+			return true, "Walk speed: " .. tostring(customSpeed)
+		end,
+	})
+
+	add({
+		name = "flyspeed", usage = "flyspeed <number>",
+		run = function(arg)
+			local n = tonumber(arg)
+			if not n then return false, "Usage: flyspeed <number>" end
+			flySpeed = math.clamp(math.round(n), 10, 300)
+			if flySliderApi then flySliderApi.set(flySpeed) end
+			return true, "Fly speed: " .. flySpeed
+		end,
+	})
+
+	add({
+		name = "join", usage = "join <friend>",
+		suggest = function()
+			local out = {}
+			for _, f in ipairs(onlineFriends) do
+				if isInGame(f) then
+					table.insert(out, {text = f.UserName, alt = f.DisplayName, desc = f.LastLocation or ""})
+				end
+			end
+			table.sort(out, function(a, b) return a.text:lower() < b.text:lower() end)
+			return out
+		end,
+		run = function(arg)
+			if arg == "" then return false, "Usage: join <friend>" end
+			if lastFetch == 0 then fetchOnlineFriends(true) end
+			local q, found = arg:lower(), nil
+			for _, f in ipairs(onlineFriends) do
+				if f.UserName:lower() == q or (f.DisplayName or ""):lower() == q then found = f break end
+			end
+			if not found then
+				for _, f in ipairs(onlineFriends) do
+					if f.UserName:lower():sub(1, #q) == q or (f.DisplayName or ""):lower():sub(1, #q) == q then
+						found = f break
+					end
+				end
+			end
+			if not found then return false, "No online friend matching '" .. arg .. "'" end
+			if not isInGame(found) then return false, (found.DisplayName or found.UserName) .. " isn't in a game" end
+			if found.GameId == game.JobId then return false, "You're already in their server" end
+			joinFriend(found)
+			return true, "Joining " .. (found.DisplayName or found.UserName)
+		end,
+	})
+
+	add({
+		name = "rejoin", usage = "rejoin",
+		run = function() doRejoin() return true, "Rejoining..." end,
+	})
+
+	add({
+		name = "emote", usage = "emote",
+		run = function() doEmote() return true, "Loading UGC emote..." end,
+	})
+
+	local TAB_NAMES = {teleport = "Normal", friends = "Friends", misc = "All", tools = "Tools", settings = "Settings"}
+	add({
+		name = "tab", usage = "tab teleport|friends|misc|tools|settings",
+		suggest = function()
+			return {
+				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""},
+				{text = "tools", desc = ""}, {text = "settings", desc = ""},
+			}
+		end,
+		run = function(arg)
+			local key = TAB_NAMES[arg:lower()]
+			if not key then return false, "Usage: tab teleport|friends|misc|tools|settings" end
+			setVisible(true)
+			switchTab(key)
+			return true, "Opened " .. arg:lower()
+		end,
+	})
+
+	add({name = "show", usage = "show", run = function() setVisible(true) return true, "Panel shown" end})
+	add({name = "hide", usage = "hide", run = function() setVisible(false) return true, "Panel hidden" end})
+
+	local function findCommand(token)
+		for _, c in ipairs(COMMANDS) do
+			if c.name == token then return c end
+			if c.aliases then
+				for _, a in ipairs(c.aliases) do
+					if a == token then return c end
+				end
+			end
+		end
+	end
+
+	local function resolveCommand(token)
+		local exact = findCommand(token)
+		if exact then return exact end
+		for _, c in ipairs(COMMANDS) do
+			if c.name:sub(1, #token) == token then return c end
+		end
+	end
+
+	-- Suggestions ----------------------------------------------------
+	local function computeSuggestions(text)
+		local list = {}
+		local sp = text:find(" ", 1, true)
+
+		if not sp then
+			local q = text:lower()
+			if q == "" then return list end
+			for _, c in ipairs(COMMANDS) do
+				if c.name:sub(1, #q) == q then
+					table.insert(list, {full = c.name .. " ", label = c.name, desc = c.usage})
+				end
+			end
+			if #list == 0 then
+				for _, c in ipairs(COMMANDS) do
+					if c.name:find(q, 1, true) then
+						table.insert(list, {full = c.name .. " ", label = c.name, desc = c.usage})
+					end
+				end
+			end
+			return list
+		end
+
+		local cmd = findCommand(text:sub(1, sp - 1):lower())
+		if not cmd then return list end
+		local q = text:sub(sp + 1):lower()
+
+		if cmd.suggest then
+			local cands = cmd.suggest()
+			local seen = {}
+			local function take(c)
+				if not seen[c] then
+					seen[c] = true
+					table.insert(list, {full = cmd.name .. " " .. c.text, label = c.text, desc = c.desc or ""})
+				end
+			end
+			for _, c in ipairs(cands) do
+				if q == "" or c.text:lower():sub(1, #q) == q or (c.alt and c.alt:lower():sub(1, #q) == q) then take(c) end
+			end
+			if q ~= "" then
+				for _, c in ipairs(cands) do
+					if c.text:lower():find(q, 1, true) or (c.alt and c.alt:lower():find(q, 1, true)) then take(c) end
+				end
+			end
+		elseif q == "" then
+			-- no completions for this command, just remind the usage
+			table.insert(list, {full = nil, label = cmd.usage, desc = ""})
+		end
+		return list
+	end
+
+	local function render()
+		local n = #suggList
+		-- keep the selected row inside the visible window
+		if selIdx < viewStart then viewStart = selIdx end
+		if selIdx > viewStart + MAX_SUGG - 1 then viewStart = selIdx - MAX_SUGG + 1 end
+
+		local shown = math.min(n, MAX_SUGG)
+		for i = 1, MAX_SUGG do
+			local row = rows[i]
+			local item = suggList[viewStart + i - 1]
+			if i <= shown and item then
+				local selected = (viewStart + i - 1 == selIdx)
+				row.frame.Visible = true
+				row.name.Text = item.label
+				row.desc.Text = item.desc
+				tween(row.frame, 0.08, {BackgroundTransparency = selected and 0 or 1})
+				tween(row.name, 0.08, {TextColor3 = selected and C.text or C.muted})
+			else
+				row.frame.Visible = false
+			end
+		end
+
+		local h = shown > 0 and (shown * ROW_H + 8) or 0
+		sugg.Visible = shown > 0 and not cmdBusy
+		tween(sugg, 0.1, {Size = UDim2.new(1, 0, 0, h)})
+
+		-- inline ghost text
+		local typed = box.Text
+		local sel = suggList[selIdx]
+		if sel and sel.full and #sel.full > #typed and sel.full:lower():sub(1, #typed) == typed:lower() then
+			ghost.Text = typed .. sel.full:sub(#typed + 1)
+		else
+			ghost.Text = ""
+		end
+	end
+
+	local function refresh()
+		suggList = computeSuggestions(box.Text)
+		selIdx, viewStart = 1, 1
+		render()
+	end
+
+	-- Open / close -----------------------------------------------------
+	local function closeBar()
+		if not cmdOpen then return end
+		cmdOpen = false
+		if box:IsFocused() then box:ReleaseFocus() end
+		local tw = tween(root, 0.16, {
+			Position = UDim2.new(0.5, 0, 1, -72 + 10),
+			GroupTransparency = 1,
+		}, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tw.Completed:Connect(function()
+			if not cmdOpen then root.Visible = false end
+		end)
+	end
+
+	local function openBar()
+		if cmdOpen or not ready then return end
+		cmdOpen, cmdBusy = true, false
+		openedAt = os.clock()
+
+		box.Visible, hint.Visible = true, true
+		feedback.Visible = false
+		box.Text, ghost.Text = "", ""
+		suggList = {}
+		sugg.Visible = false
+		sugg.Size = UDim2.new(1, 0, 0, 0)
+
+		root.Visible = true
+		root.Position = LOW
+		root.GroupTransparency = 1
+		tween(root, 0.26, {Position = REST, GroupTransparency = 0}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+		task.wait() -- let the key press finish first so ";" isn't typed into the box
+		if cmdOpen then box:CaptureFocus() end
+	end
+
+	toggleCommandBar = function()
+		if cmdOpen then
+			if not cmdBusy then closeBar() end
+		else
+			task.spawn(openBar)
+		end
+	end
+
+	-- Running -----------------------------------------------------
+	local function showResult(ok, msg)
+		cmdBusy = true
+		box.Visible, ghost.Text, hint.Visible = false, "", false
+		sugg.Visible = false
+		feedback.Text = msg
+		feedback.TextColor3 = ok and C.mint or C.err
+		feedback.Visible = true
+		task.delay(ok and 0.9 or 1.7, function()
+			if cmdBusy then
+				cmdBusy = false
+				closeBar()
+			end
+		end)
+	end
+
+	local function runText(raw)
+		local text = raw:gsub("^%s+", ""):gsub("%s+$", "")
+		if text == "" then return false, "Type a command first" end
+		local name, arg = text:match("^(%S+)%s*(.-)$")
+		local cmd = resolveCommand(name:lower())
+		if not cmd then return false, "Unknown command: " .. name end
+		local ok, a, b = pcall(cmd.run, arg or "")
+		if not ok then
+			warn("Command error: " .. tostring(a))
+			return false, "Command failed"
+		end
+		if a == nil then a = true end
+		return a, b or ""
+	end
+
+	-- Events -------------------------------------------------------
+	box:GetPropertyChangedSignal("Text"):Connect(function()
+		local t = box.Text
+		local cleaned = t:gsub("\t", ""):gsub("^%s+", "")
+		if cleaned ~= t then
+			box.Text = cleaned
+			box.CursorPosition = #cleaned + 1
+			return
+		end
+
+		-- the key that opened the bar can leak into the box as a character
+		local ch = ""
+		local okc, str = pcall(function() return UserInputService:GetStringForKeyCode(cmdKey) end)
+		if okc and type(str) == "string" and #str == 1 then ch = str end
+		if ch ~= "" and cmdOpen and os.clock() - openedAt < 0.25 and t:lower() == ch:lower() then
+			box.Text = ""
+			return
+		end
+
+		refresh()
+	end)
+
+	box.FocusLost:Connect(function(enterPressed)
+		if not cmdOpen or cmdBusy then return end
+		if enterPressed then
+			local ok, msg = runText(box.Text)
+			showResult(ok, msg)
+		else
+			closeBar()
+		end
+	end)
+
+	UserInputService.InputBegan:Connect(function(input)
+		if not cmdOpen or cmdBusy or not box:IsFocused() then return end
+		local n = #suggList
+		if input.KeyCode == Enum.KeyCode.Tab then
+			local s = suggList[selIdx]
+			if s and s.full then
+				box.Text = s.full
+				box.CursorPosition = #box.Text + 1
+			end
+		elseif input.KeyCode == Enum.KeyCode.Down and n > 0 then
+			selIdx = selIdx % n + 1
+			render()
+		elseif input.KeyCode == Enum.KeyCode.Up and n > 0 then
+			selIdx = (selIdx - 2) % n + 1
+			render()
+		end
+	end)
+end)()
 
 --------------------------------------------------------------------
 -- Dragging (title bar + the slim handle at the bottom)
@@ -2868,7 +3615,7 @@ makeDraggable(titleBar)
 -- Floating drag handle that hovers just below the panel.
 -- It lives in the ScreenGui (not inside the panel, which clips its children)
 -- and follows the panel's position and size.
-do
+;(function()
 	local dock = Instance.new("TextButton")
 	dock.Name = "DragDock"
 	dock.AnchorPoint = Vector2.new(0.5, 0)
@@ -2925,13 +3672,13 @@ do
 		end
 	end)
 	makeDraggable(dock)
-end
+end)()
 
 --------------------------------------------------------------------
 -- Resizing (drag the grip in the bottom right corner)
 --------------------------------------------------------------------
-do
-	local MIN_W, MIN_H, MAX_W, MAX_H = 580, 380, 1000, 720
+;(function()
+	local MIN_W, MIN_H, MAX_W, MAX_H = 700, 380, 1000, 720
 
 	local grip = Instance.new("TextButton")
 	grip.Name = "ResizeGrip"
@@ -2996,7 +3743,7 @@ do
 			)
 		end
 	end)
-end
+end)()
 
 --------------------------------------------------------------------
 -- Loading bar, then the panel pops in
