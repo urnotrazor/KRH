@@ -6,7 +6,8 @@
 	  Teleport - type a username / display name. A player card pops out with
 	             TELEPORT, SPECTATE and ESP buttons for that person.
 	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
-	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed.
+	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed,
+	             fullbright, no fog, no shadows, no effects.
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
 	  Settings - change the command bar key.
@@ -2452,6 +2453,131 @@ task.spawn(function()
 	end
 end)
 
+--------------------------------------------------------------------
+-- Lighting: fullbright, no fog, no shadows, no post effects
+-- Each option is independent. While an option is on, its values are
+-- re-applied every frame so the game can't switch them back. Turning
+-- it off restores whatever the game had before.
+--------------------------------------------------------------------
+local LIGHT = {fb = false, fog = false, shadow = false, fx = false}
+local setLight
+do
+	local Lighting = game:GetService("Lighting")
+
+	local PROPS = {
+		fb = {
+			Brightness = 2,
+			ClockTime = 14,
+			Ambient = Color3.fromRGB(170, 170, 170),
+			OutdoorAmbient = Color3.fromRGB(170, 170, 170),
+		},
+		fog = {FogStart = 1e9, FogEnd = 1e9},
+		shadow = {GlobalShadows = false},
+	}
+	local EFFECTS = {
+		BlurEffect = true, ColorCorrectionEffect = true, SunRaysEffect = true,
+		BloomEffect = true, DepthOfFieldEffect = true,
+	}
+
+	local orig = {}                                  -- [prop] = value before we touched it
+	local savedInst = setmetatable({}, {__mode = "k"}) -- [Atmosphere / effect] = original values
+
+	local function applyProps()
+		for flag, props in pairs(PROPS) do
+			if LIGHT[flag] then
+				for prop, value in pairs(props) do
+					if Lighting[prop] ~= value then Lighting[prop] = value end
+				end
+			end
+		end
+	end
+
+	local function applyInstances()
+		if not (LIGHT.fog or LIGHT.fx) then return end
+		for _, parent in ipairs({Lighting, workspace.CurrentCamera}) do
+			if parent then
+				for _, c in ipairs(parent:GetChildren()) do
+					if LIGHT.fog and c:IsA("Atmosphere") then
+						if not savedInst[c] then savedInst[c] = {Density = c.Density, Haze = c.Haze} end
+						if c.Density ~= 0 then c.Density = 0 end
+						if c.Haze ~= 0 then c.Haze = 0 end
+					elseif LIGHT.fx and EFFECTS[c.ClassName] then
+						if not savedInst[c] then savedInst[c] = {Enabled = c.Enabled} end
+						if c.Enabled then c.Enabled = false end
+					end
+				end
+			end
+		end
+	end
+
+	local function restore(flag)
+		for prop in pairs(PROPS[flag] or {}) do
+			if orig[prop] ~= nil then
+				Lighting[prop] = orig[prop]
+				orig[prop] = nil
+			end
+		end
+		for c, v in pairs(savedInst) do
+			if c.Parent then
+				if flag == "fog" and v.Density ~= nil then
+					c.Density, c.Haze = v.Density, v.Haze
+					savedInst[c] = nil
+				elseif flag == "fx" and v.Enabled ~= nil then
+					c.Enabled = v.Enabled
+					savedInst[c] = nil
+				end
+			end
+		end
+	end
+
+	local conn, acc = nil, 0
+	local function anyOn()
+		for _, v in pairs(LIGHT) do
+			if v then return true end
+		end
+		return false
+	end
+	local function stopLoop()
+		if conn then conn:Disconnect() conn = nil end
+	end
+	local function ensureLoop()
+		if conn then return end
+		conn = RunService.Heartbeat:Connect(function(dt)
+			if not gui.Parent then
+				-- the script was run again: put the lighting back and stop
+				for flag in pairs(LIGHT) do
+					if LIGHT[flag] then LIGHT[flag] = false restore(flag) end
+				end
+				stopLoop()
+				return
+			end
+			applyProps()
+			acc += dt
+			if acc >= 0.5 then
+				acc = 0
+				applyInstances()
+			end
+		end)
+	end
+
+	setLight = function(flag, state)
+		if LIGHT[flag] == nil or LIGHT[flag] == state then return end
+		LIGHT[flag] = state
+		if state then
+			for prop in pairs(PROPS[flag] or {}) do
+				if orig[prop] == nil then orig[prop] = Lighting[prop] end
+			end
+			applyProps()
+			applyInstances()
+			ensureLoop()
+		else
+			restore(flag)
+			if not anyOn() then stopLoop() end
+		end
+		if updateUI then updateUI() end
+	end
+end
+
 -- Page: Misc -------------------------------------------------------------
 do
 	local left  = makeColumn(allPage, "left")
@@ -2493,6 +2619,20 @@ do
 		clearBtn.MouseButton1Click:Connect(clearAllEsp)
 	end
 
+	-- Fullbright
+	do
+		local card, head = makeCard(left, "Fullbright")
+		addSwitch(head, "light_fb", function(on) setLight("fb", on) end)
+		addHint(card, "Bright daylight and even lighting everywhere, including dark places.")
+	end
+
+	-- No fog
+	do
+		local card, head = makeCard(left, "No fog")
+		addSwitch(head, "light_fog", function(on) setLight("fog", on) end)
+		addHint(card, "Removes fog and haze so you can see far away.")
+	end
+
 	-- Freecam
 	do
 		local card, head = makeCard(right, "Freecam")
@@ -2509,6 +2649,20 @@ do
 			if on ~= antiAfkOn then setAntiAfk(on) end
 		end)
 		addHint(card, "Stops you from being kicked for idling.")
+	end
+
+	-- No shadows
+	do
+		local card, head = makeCard(right, "No shadows")
+		addSwitch(head, "light_shadow", function(on) setLight("shadow", on) end)
+		addHint(card, "Turns off global shadows.")
+	end
+
+	-- No post effects
+	do
+		local card, head = makeCard(right, "No effects")
+		addSwitch(head, "light_fx", function(on) setLight("fx", on) end)
+		addHint(card, "Turns off blur, color correction, bloom, sun rays and depth of field.")
 	end
 
 	-- Rejoin (a plain button, not a switch)
@@ -2710,6 +2864,10 @@ updateUI = function()
 	sw("noclip", noclipOn)
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
+	sw("light_fb", LIGHT.fb)
+	sw("light_fog", LIGHT.fog)
+	sw("light_shadow", LIGHT.shadow)
+	sw("light_fx", LIGHT.fx)
 
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
@@ -2969,6 +3127,7 @@ end
 		"spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
 		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
+			"fullbright  nofog  noshadows  nofx  (on|off)",
 		"speed <number|reset>  ·  flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
@@ -3245,6 +3404,14 @@ end)()
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
+	boolCommand("fullbright", "fullbright", function() return LIGHT.fb end,
+		function(v) setLight("fb", v) end, "Fullbright")
+	boolCommand("nofog", "nofog", function() return LIGHT.fog end,
+		function(v) setLight("fog", v) end, "No fog")
+	boolCommand("noshadows", "noshadows", function() return LIGHT.shadow end,
+		function(v) setLight("shadow", v) end, "No shadows")
+	boolCommand("nofx", "nofx", function() return LIGHT.fx end,
+		function(v) setLight("fx", v) end, "No effects")
 
 	add({
 		name = "speed", usage = "speed <number|reset>",
