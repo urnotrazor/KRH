@@ -304,8 +304,10 @@ end
 --------------------------------------------------------------------
 -- GUI shell
 --------------------------------------------------------------------
+do
 local old = playerGui:FindFirstChild("TeleportGui")
 if old then old:Destroy() end
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "TeleportGui"
@@ -339,12 +341,14 @@ titleBar.BorderSizePixel = 0
 titleBar.Parent = main
 corner(titleBar, 10)
 
+do
 local titlePatch = Instance.new("Frame")
 titlePatch.Size = UDim2.new(1, 0, 0, 12)
 titlePatch.Position = UDim2.new(0, 0, 1, -12)
 titlePatch.BackgroundColor3 = C.bar
 titlePatch.BorderSizePixel = 0
 titlePatch.Parent = titleBar
+end
 
 label(titleBar, {
 	Text = "KRHUB",
@@ -434,12 +438,14 @@ banner.BackgroundColor3 = C.goldBg
 banner.BorderSizePixel = 0
 banner.Parent = main
 
+do
 local bannerLine = Instance.new("Frame")
 bannerLine.Position = UDim2.new(0, 0, 1, -1)
 bannerLine.Size = UDim2.new(1, 0, 0, 1)
 bannerLine.BackgroundColor3 = C.goldLine
 bannerLine.BorderSizePixel = 0
 bannerLine.Parent = banner
+end
 
 local playerCount = label(banner, {
 	Text = "Players: 0",
@@ -507,6 +513,7 @@ footer.BackgroundColor3 = C.bar
 footer.BorderSizePixel = 0
 footer.Parent = main
 
+do
 local footerLine = Instance.new("Frame")
 footerLine.Size = UDim2.new(1, 0, 0, 1)
 footerLine.BackgroundColor3 = C.cardStroke
@@ -564,6 +571,7 @@ label(chip, {
 	Position = UDim2.fromOffset(42, 19),
 	Size = UDim2.new(1, -54, 0, 13),
 })
+end
 
 local function updatePlayerCount()
 	playerCount.Text = ("Players: %d/%d"):format(#Players:GetPlayers(), Players.MaxPlayers)
@@ -863,9 +871,11 @@ end
 --------------------------------------------------------------------
 -- Anti-AFK
 --------------------------------------------------------------------
+local antiAfkOn = false
+local setAntiAfk
+do
 local VirtualUser = game:GetService("VirtualUser")
 
-local antiAfkOn     = false
 local antiAfkConn   = nil
 local antiAfkStored = {}   -- other Idled connections we paused
 local antiAfkMode   = nil  -- "VirtualUser" or "VIM"
@@ -943,7 +953,7 @@ local function enableAntiAfk()
 	return true
 end
 
-local function setAntiAfk(state)
+setAntiAfk = function(state)
 	if state then
 		if enableAntiAfk() then
 			antiAfkOn = true
@@ -959,13 +969,16 @@ local function setAntiAfk(state)
 	end
 	if updateUI then updateUI() end
 end
+end
 
 --------------------------------------------------------------------
 -- Freecam
 --------------------------------------------------------------------
+local freecamOn = false
+local startFreecam, toggleFreecam
+do
 local FC_MIN, FC_MAX = 5, 300
 local fcSpeed = 50
-local freecamOn = false
 local fcConn
 local fcPos = Vector3.zero
 local fcPitch, fcYaw = 0, 0
@@ -978,7 +991,7 @@ local function getControls()
 	return ok and controls or nil
 end
 
-local function startFreecam()
+startFreecam = function()
 	if freecamOn then return end
 	local cam = workspace.CurrentCamera
 	if not cam then return end
@@ -1059,7 +1072,7 @@ stopFreecam = function(silent)
 	if not silent then setStatus("Freecam off", C.muted) end
 end
 
-local function toggleFreecam()
+toggleFreecam = function()
 	if freecamOn then stopFreecam() else startFreecam() end
 end
 
@@ -1070,6 +1083,7 @@ UserInputService.InputChanged:Connect(function(input, processed)
 		setStatus("Freecam speed: " .. math.floor(fcSpeed + 0.5), C.muted)
 	end
 end)
+end
 
 --------------------------------------------------------------------
 -- Walk speed
@@ -1803,7 +1817,7 @@ local vcPage      = newPage(false)
 local settingsPage = newPage(false)
 
 -- Page: Teleport (input + player card) -------------------------------
-do
+;(function()
 	local left  = makeColumn(normalPage, "left")
 	local right = makeColumn(normalPage, "right")
 
@@ -1972,7 +1986,7 @@ do
 	cardEspBtn.MouseButton1Click:Connect(function()
 		toggleEsp(currentMatch)
 	end)
-end
+end)()
 
 -- Page: Friends --------------------------------------------------------
 -- Left : friends in this server (TP / SPECTATE / ESP)
@@ -2876,7 +2890,7 @@ local function keyName(code)
 	return code.Name
 end
 
-do
+;(function()
 	local left  = makeColumn(settingsPage, "left")
 	local right = makeColumn(settingsPage, "right")
 
@@ -2961,12 +2975,12 @@ do
 		"",
 		"Tab = autocomplete   Up / Down = choose   Enter = run",
 	}, "\n"))
-end
+end)()
 
 --------------------------------------------------------------------
 -- Command bar
 --------------------------------------------------------------------
-do
+;(function()
 	local CMD_W, ROW_H, MAX_SUGG = 460, 28, 6
 	local REST = UDim2.new(0.5, 0, 1, -72)       -- where the bar sits
 	local LOW  = UDim2.new(0.5, 0, 1, -72 + 16)  -- where it slides up from
@@ -3562,7 +3576,7 @@ do
 			render()
 		end
 	end)
-end
+end)()
 
 --------------------------------------------------------------------
 -- Dragging (title bar + the slim handle at the bottom)
@@ -3601,7 +3615,7 @@ makeDraggable(titleBar)
 -- Floating drag handle that hovers just below the panel.
 -- It lives in the ScreenGui (not inside the panel, which clips its children)
 -- and follows the panel's position and size.
-do
+;(function()
 	local dock = Instance.new("TextButton")
 	dock.Name = "DragDock"
 	dock.AnchorPoint = Vector2.new(0.5, 0)
@@ -3658,12 +3672,12 @@ do
 		end
 	end)
 	makeDraggable(dock)
-end
+end)()
 
 --------------------------------------------------------------------
 -- Resizing (drag the grip in the bottom right corner)
 --------------------------------------------------------------------
-do
+;(function()
 	local MIN_W, MIN_H, MAX_W, MAX_H = 700, 380, 1000, 720
 
 	local grip = Instance.new("TextButton")
@@ -3729,7 +3743,7 @@ do
 			)
 		end
 	end)
-end
+end)()
 
 --------------------------------------------------------------------
 -- Loading bar, then the panel pops in
