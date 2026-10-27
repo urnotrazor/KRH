@@ -2454,54 +2454,49 @@ task.spawn(function()
 end)
 
 --------------------------------------------------------------------
--- Lighting: fullbright, no fog, no shadows, no post effects
--- Each option is independent. While an option is on, its values are
--- re-applied every frame so the game can't switch them back. Turning
--- it off restores whatever the game had before.
+-- Fullbright: ONE toggle. Turns on bright daylight and removes fog,
+-- shadows and post effects together. Values are re-applied every frame
+-- so the game can't switch them back; turning it off restores
+-- whatever the game had before.
 --------------------------------------------------------------------
-local LIGHT = {fb = false, fog = false, shadow = false, fx = false}
-local setLight
+local fullbrightOn = false
+local setFullbright
 do
 	local Lighting = game:GetService("Lighting")
 
-	local PROPS = {
-		fb = {
-			Brightness = 2,
-			ClockTime = 14,
-			Ambient = Color3.fromRGB(170, 170, 170),
-			OutdoorAmbient = Color3.fromRGB(170, 170, 170),
-		},
-		fog = {FogStart = 1e9, FogEnd = 1e9},
-		shadow = {GlobalShadows = false},
+	local FORCED = {
+		Brightness     = 2,
+		ClockTime      = 14,
+		Ambient        = Color3.fromRGB(170, 170, 170),
+		OutdoorAmbient = Color3.fromRGB(170, 170, 170),
+		FogStart       = 1e9,
+		FogEnd         = 1e9,
+		GlobalShadows  = false,
 	}
 	local EFFECTS = {
 		BlurEffect = true, ColorCorrectionEffect = true, SunRaysEffect = true,
 		BloomEffect = true, DepthOfFieldEffect = true,
 	}
 
-	local orig = {}                                  -- [prop] = value before we touched it
-	local savedInst = setmetatable({}, {__mode = "k"}) -- [Atmosphere / effect] = original values
+	local origProps = {}                                -- [prop] = value before we touched it
+	local savedInst = setmetatable({}, {__mode = "k"})  -- [Atmosphere / effect] = original values
+	local conn, acc = nil, 0
 
 	local function applyProps()
-		for flag, props in pairs(PROPS) do
-			if LIGHT[flag] then
-				for prop, value in pairs(props) do
-					if Lighting[prop] ~= value then Lighting[prop] = value end
-				end
-			end
+		for prop, value in pairs(FORCED) do
+			if Lighting[prop] ~= value then Lighting[prop] = value end
 		end
 	end
 
 	local function applyInstances()
-		if not (LIGHT.fog or LIGHT.fx) then return end
 		for _, parent in ipairs({Lighting, workspace.CurrentCamera}) do
 			if parent then
 				for _, c in ipairs(parent:GetChildren()) do
-					if LIGHT.fog and c:IsA("Atmosphere") then
+					if c:IsA("Atmosphere") then
 						if not savedInst[c] then savedInst[c] = {Density = c.Density, Haze = c.Haze} end
 						if c.Density ~= 0 then c.Density = 0 end
 						if c.Haze ~= 0 then c.Haze = 0 end
-					elseif LIGHT.fx and EFFECTS[c.ClassName] then
+					elseif EFFECTS[c.ClassName] then
 						if not savedInst[c] then savedInst[c] = {Enabled = c.Enabled} end
 						if c.Enabled then c.Enabled = false end
 					end
@@ -2510,76 +2505,54 @@ do
 		end
 	end
 
-	local function restore(flag)
-		for prop in pairs(PROPS[flag] or {}) do
-			if orig[prop] ~= nil then
-				Lighting[prop] = orig[prop]
-				orig[prop] = nil
-			end
+	local function restore()
+		for prop, value in pairs(origProps) do
+			Lighting[prop] = value
 		end
+		table.clear(origProps)
 		for c, v in pairs(savedInst) do
 			if c.Parent then
-				if flag == "fog" and v.Density ~= nil then
-					c.Density, c.Haze = v.Density, v.Haze
-					savedInst[c] = nil
-				elseif flag == "fx" and v.Enabled ~= nil then
+				if v.Enabled ~= nil then
 					c.Enabled = v.Enabled
-					savedInst[c] = nil
+				else
+					c.Density, c.Haze = v.Density, v.Haze
 				end
 			end
 		end
+		table.clear(savedInst)
 	end
 
-	local conn, acc = nil, 0
-	local function anyOn()
-		for _, v in pairs(LIGHT) do
-			if v then return true end
-		end
-		return false
-	end
-	local function stopLoop()
-		if conn then conn:Disconnect() conn = nil end
-	end
-	local function ensureLoop()
-		if conn then return end
-		conn = RunService.Heartbeat:Connect(function(dt)
-			if not gui.Parent then
-				-- the script was run again: put the lighting back and stop
-				for flag in pairs(LIGHT) do
-					if LIGHT[flag] then LIGHT[flag] = false restore(flag) end
-				end
-				stopLoop()
-				return
-			end
-			applyProps()
-			acc += dt
-			if acc >= 0.5 then
-				acc = 0
-				applyInstances()
-			end
-		end)
-	end
+	setFullbright = function(state)
+		state = state and true or false
+		if state == fullbrightOn then return end
+		fullbrightOn = state
 
-	setLight = function(flag, state)
-		if flag == "all" then
-			-- the single Fullbright switch: all four options together
-			for _, f in ipairs({"fb", "fog", "shadow", "fx"}) do setLight(f, state) end
-			return
-		end
-		if LIGHT[flag] == nil or LIGHT[flag] == state then return end
-		LIGHT[flag] = state
 		if state then
-			for prop in pairs(PROPS[flag] or {}) do
-				if orig[prop] == nil then orig[prop] = Lighting[prop] end
-			end
+			for prop in pairs(FORCED) do origProps[prop] = Lighting[prop] end
 			applyProps()
 			applyInstances()
-			ensureLoop()
+			conn = RunService.Heartbeat:Connect(function(dt)
+				if not gui.Parent then
+					-- the script was run again: put the lighting back and stop
+					setFullbright(false)
+					return
+				end
+				applyProps()
+				acc += dt
+				if acc >= 0.5 then
+					acc = 0
+					applyInstances()
+				end
+			end)
 		else
-			restore(flag)
-			if not anyOn() then stopLoop() end
+			if conn then conn:Disconnect() conn = nil end
+			restore()
 		end
+
 		if updateUI then updateUI() end
+		if gui.Parent then
+			setStatus(state and "Fullbright on" or "Fullbright off", state and C.ok or C.muted)
+		end
 	end
 end
 
@@ -2624,10 +2597,10 @@ do
 		clearBtn.MouseButton1Click:Connect(clearAllEsp)
 	end
 
-	-- Fullbright
+	-- Fullbright (one switch)
 	do
 		local card, head = makeCard(left, "Fullbright")
-		addSwitch(head, "light_fb", function(on) setLight("all", on) end)
+		addSwitch(head, "light_fb", function(on) setFullbright(on) end)
 		addHint(card, "Bright daylight everywhere, and removes fog, shadows, blur and color effects. Turn it off to put the lighting back how the game had it.")
 	end
 
@@ -2848,7 +2821,7 @@ updateUI = function()
 	sw("noclip", noclipOn)
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
-	sw("light_fb", LIGHT.fb)
+	sw("light_fb", fullbrightOn)
 
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
@@ -3108,7 +3081,7 @@ end
 		"spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
 		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
-			"fullbright  (on|off)",
+		"fullbright  (on|off)",
 		"speed <number|reset>  ·  flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
@@ -3385,8 +3358,7 @@ end)()
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
-	boolCommand("fullbright", "fullbright", function() return LIGHT.fb end,
-		function(v) setLight("all", v) end, "Fullbright")
+	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 
 	add({
 		name = "speed", usage = "speed <number|reset>",
