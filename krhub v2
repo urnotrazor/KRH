@@ -10,7 +10,7 @@
 	             fullbright (also removes fog, shadows, effects).
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
-	  Settings - change the command bar key.
+	  Settings - turn keybinds on / off and change every key.
 
 	Command bar: press ; (rebindable) and type goto <name>, esp on, fly, ...
 
@@ -18,8 +18,8 @@
 	  - Enter in the box teleports to the matched player
 	  - Drag the title bar to move
 	  - "-" minimizes, "x" hides it
-	  - K toggles show/hide
-	  - P toggles freecam (WASD, E/Q, hold right mouse to look)
+	  - Keys are rebindable in Settings (defaults: K window, P freecam, F fly, N noclip)
+	  - Freecam: WASD, E/Q, hold right mouse to look
 	  - Slider value boxes are editable: type a number and press Enter
 ]]
 
@@ -2005,19 +2005,65 @@ local speedSliderApi, flySliderApi      -- so commands can move the sliders too
 local toggleCommandBar                  -- filled in by the command bar
 local cmdKey = Enum.KeyCode.Semicolon   -- key that opens the command bar (rebindable)
 local SETTINGS_FILE = "KRHUB_settings.json"
+
+-- Keybinds for every feature. false = no key. The window key and the command
+-- bar key always work; the master switch only controls the feature keys, so you
+-- can never lock yourself out of the window.
+local KB = {
+	on = true,
+	binds = {},
+	actions = {},   -- filled in next to the key handler
+	defs = {
+		{id = "toggleGui",  name = "Show / hide window", default = Enum.KeyCode.K},
+		{id = "freecam",    name = "Freecam",            default = Enum.KeyCode.P},
+		{id = "fly",        name = "Fly",                default = Enum.KeyCode.F},
+		{id = "noclip",     name = "Noclip",             default = Enum.KeyCode.N},
+		{id = "clickTp",    name = "Click teleport",     default = false},
+		{id = "fullbright", name = "Fullbright",         default = false},
+		{id = "espAll",     name = "ESP everyone",       default = false},
+		{id = "espNames",   name = "ESP names",          default = false},
+		{id = "antiAfk",    name = "Anti-AFK",           default = false},
+	},
+}
+for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
+
 do
 	pcall(function()
 		if isfile and readfile and isfile(SETTINGS_FILE) then
 			local data = game:GetService("HttpService"):JSONDecode(readfile(SETTINGS_FILE))
-			local code = data and data.commandKey and Enum.KeyCode[data.commandKey]
-			if code then cmdKey = code end
+			local function code(name)
+				local ok, c = pcall(function() return Enum.KeyCode[name] end)
+				return ok and c or nil
+			end
+			if data.commandKey and code(data.commandKey) then cmdKey = code(data.commandKey) end
+			if data.keybindsOn ~= nil then KB.on = data.keybindsOn and true or false end
+			if type(data.binds) == "table" then
+				for _, def in ipairs(KB.defs) do
+					local v = data.binds[def.id]
+					if v == false then
+						KB.binds[def.id] = false
+					elseif type(v) == "string" and code(v) then
+						KB.binds[def.id] = code(v)
+					end
+				end
+			end
 		end
 	end)
 end
+
 local function saveSettings()
 	pcall(function()
 		if writefile then
-			writefile(SETTINGS_FILE, game:GetService("HttpService"):JSONEncode({commandKey = cmdKey.Name}))
+			local out = {}
+			for _, def in ipairs(KB.defs) do
+				local c = KB.binds[def.id]
+				out[def.id] = c and c.Name or false
+			end
+			writefile(SETTINGS_FILE, game:GetService("HttpService"):JSONEncode({
+				commandKey = cmdKey.Name,
+				keybindsOn = KB.on,
+				binds = out,
+			}))
 		end
 	end)
 end
@@ -2619,7 +2665,7 @@ do
 		addSwitch(head, "freecam", function(on)
 			if on ~= freecamOn then toggleFreecam() end
 		end)
-		addHint(card, "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Key: P")
+		addHint(card, "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Default key: P (change it in Settings)")
 	end
 
 	-- Anti-AFK
@@ -2772,9 +2818,9 @@ do
 
 	-- Hello (loads your own script, same look as UGC emote)
 	do
-		local card = makeCard(left, "Jerk")
-		addHint(card, "A jerk tool.")
-		local helloBtn = makeButton(card, "JERK", "primary", 12)
+		local card = makeCard(left, "Hello")
+		addHint(card, "Loads your Hello script. Press it again to load a fresh copy.")
+		local helloBtn = makeButton(card, "HELLO", "primary", 12)
 		helloBtn.Name = "HelloButton"
 		helloBtn.Size = UDim2.new(1, 0, 0, 34)
 		helloBtn.LayoutOrder = nextOrder(card)
@@ -2865,6 +2911,7 @@ updateUI = function()
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
 	sw("light_fb", fullbrightOn)
+	sw("keybinds", KB.on)
 
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
@@ -3022,20 +3069,45 @@ closeBtn.MouseButton1Click:Connect(function()
 	setVisible(false) -- just hides it; press K to bring it back
 end)
 
+-- what each feature key does
+KB.actions.freecam    = function() toggleFreecam() end
+KB.actions.fly        = function() toggleFly() end
+KB.actions.noclip     = function() setNoclip(not noclipOn) end
+KB.actions.clickTp    = function() setClickTp(not clickTpOn) end
+KB.actions.fullbright = function() setFullbright(not fullbrightOn) end
+KB.actions.espAll     = function() setEspAll(not espAll) end
+KB.actions.espNames   = function() setEspNames(not espNames) end
+KB.actions.antiAfk    = function() setAntiAfk(not antiAfkOn) end
+
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed or capturingKey then return end
-	if input.KeyCode == Enum.KeyCode.K then
+	local code = input.KeyCode
+	if code == Enum.KeyCode.Unknown then return end
+
+	-- these two always work
+	if code == cmdKey then
+		if toggleCommandBar then toggleCommandBar() end
+		return
+	end
+	if code == KB.binds.toggleGui then
 		setVisible(not visible)
-	elseif input.KeyCode == Enum.KeyCode.P then
-		toggleFreecam()
-	elseif input.KeyCode == cmdKey and toggleCommandBar then
-		toggleCommandBar()
+		return
+	end
+
+	-- feature keys follow the master switch
+	if not KB.on then return end
+	for id, key in pairs(KB.binds) do
+		local action = KB.actions[id]
+		if action and key == code then
+			action()
+			return
+		end
 	end
 end)
 
 
 --------------------------------------------------------------------
--- Settings tab (rebind the command bar key)
+-- Settings tab (command bar key + a key for every feature)
 --------------------------------------------------------------------
 local function keyName(code)
 	local ok, str = pcall(function()
@@ -3049,6 +3121,105 @@ end
 	local left  = makeColumn(settingsPage, "left")
 	local right = makeColumn(settingsPage, "right")
 
+	local buttons = {}          -- [id] = key button ("cmd" = the command bar key)
+	local captureId, captureConn
+
+	local function labelFor(id)
+		if id == "cmd" then return keyName(cmdKey) end
+		local code = KB.binds[id]
+		return code and keyName(code) or "None"
+	end
+
+	local function repaint(id, listening)
+		local b = buttons[id]
+		if b then setToggleStyle(b, listening, "Press a key...", labelFor(id)) end
+	end
+
+	local function nameOf(id)
+		if id == "cmd" then return "Command bar" end
+		for _, def in ipairs(KB.defs) do
+			if def.id == id then return def.name end
+		end
+		return id
+	end
+
+	-- who already uses this key? (so two things never share one key)
+	local function ownerOf(code, exceptId)
+		if exceptId ~= "cmd" and cmdKey == code then return "Command bar" end
+		for _, def in ipairs(KB.defs) do
+			if def.id ~= exceptId and KB.binds[def.id] == code then return def.name end
+		end
+	end
+
+	local function stopCapture()
+		if captureConn then captureConn:Disconnect() captureConn = nil end
+		local id = captureId
+		captureId = nil
+		if id then repaint(id, false) end
+		-- clear on the next step so the key that was just pressed doesn't also trigger its action
+		task.defer(function()
+			if not captureId then capturingKey = false end
+		end)
+	end
+
+	-- keys used for moving / typing, so they can't be bound
+	local RESERVED = {}
+	for _, k in ipairs({
+		Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D,
+		Enum.KeyCode.E, Enum.KeyCode.Q, Enum.KeyCode.Space,
+		Enum.KeyCode.LeftShift, Enum.KeyCode.RightShift,
+		Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl,
+		Enum.KeyCode.Tab, Enum.KeyCode.Return,
+	}) do RESERVED[k] = true end
+
+	local function onCaptureKey(input)
+		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local code = input.KeyCode
+		if code == Enum.KeyCode.Unknown or not captureId then return end
+		local id = captureId
+
+		if code == Enum.KeyCode.Escape then
+			stopCapture()
+			setStatus("Key change cancelled", C.muted)
+		elseif code == Enum.KeyCode.Backspace or code == Enum.KeyCode.Delete then
+			if id == "cmd" then
+				setStatus("The command bar needs a key", C.err)
+			else
+				KB.binds[id] = false
+				stopCapture()
+				saveSettings()
+				setStatus(nameOf(id) .. " key cleared", C.muted)
+			end
+		elseif RESERVED[code] then
+			setStatus(keyName(code) .. " can't be used (movement / typing key)", C.err)
+		else
+			local owner = ownerOf(code, id)
+			if owner then
+				setStatus(keyName(code) .. " is already used by " .. owner, C.err)
+			else
+				if id == "cmd" then cmdKey = code else KB.binds[id] = code end
+				stopCapture()
+				saveSettings()
+				setStatus(nameOf(id) .. " key: " .. keyName(code), C.ok)
+			end
+		end
+	end
+
+	local function startCapture(id)
+		if captureId == id then
+			stopCapture()
+			return
+		end
+		if captureConn then captureConn:Disconnect() captureConn = nil end
+		local prev = captureId
+		captureId = id
+		capturingKey = true
+		if prev then repaint(prev, false) end
+		repaint(id, true)
+		captureConn = UserInputService.InputBegan:Connect(onCaptureKey)
+	end
+
+	-- LEFT: the command bar key (the "prefix") ---------------------------
 	local card = makeCard(left, "Command bar key")
 	addHint(card, "Press this key anywhere in the game to open the command bar. Click the key below, then press the new key. Esc cancels.")
 
@@ -3056,81 +3227,95 @@ end
 	keyBtn.Name = "CommandKeyButton"
 	keyBtn.Size = UDim2.new(1, 0, 0, 40)
 	keyBtn.LayoutOrder = nextOrder(card)
-
-	local captureConn
-	local function finishCapture()
-		if captureConn then captureConn:Disconnect() captureConn = nil end
-		-- clear on the next step so the key that was just pressed doesn't also trigger its action
-		task.defer(function() capturingKey = false end)
-		keyBtn.Text = keyName(cmdKey)
-		keyBtn:SetAttribute("base", C.field)
-		tween(keyBtn, 0.2, {TextColor3 = C.text})
-		local st = keyBtn:FindFirstChild("Stroke")
-		if st then tween(st, 0.2, {Color = C.cardStroke}) end
-	end
-
-	local RESERVED = {
-		[Enum.KeyCode.K] = true, [Enum.KeyCode.P] = true,
-		[Enum.KeyCode.Return] = true, [Enum.KeyCode.Tab] = true,
-		[Enum.KeyCode.Backspace] = true, [Enum.KeyCode.Space] = true,
-	}
-
-	keyBtn.MouseButton1Click:Connect(function()
-		if capturingKey then
-			finishCapture()
-			return
-		end
-		capturingKey = true
-		keyBtn.Text = "Press a key..."
-		keyBtn:SetAttribute("base", C.goldBg)
-		tween(keyBtn, 0.2, {TextColor3 = C.mint})
-		local st = keyBtn:FindFirstChild("Stroke")
-		if st then tween(st, 0.2, {Color = C.mint}) end
-
-		captureConn = UserInputService.InputBegan:Connect(function(input)
-			if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
-			if input.KeyCode == Enum.KeyCode.Escape then
-				finishCapture()
-				setStatus("Key change cancelled", C.muted)
-			elseif input.KeyCode == Enum.KeyCode.Unknown then
-				return
-			elseif RESERVED[input.KeyCode] then
-				setStatus(keyName(input.KeyCode) .. " is reserved, pick another key", C.err)
-			else
-				cmdKey = input.KeyCode
-				saveSettings()
-				finishCapture()
-				setStatus("Command bar key: " .. keyName(cmdKey), C.ok)
-			end
-		end)
-	end)
+	buttons.cmd = keyBtn
+	keyBtn.MouseButton1Click:Connect(function() startCapture("cmd") end)
 
 	local resetBtn = makeButton(card, "RESET TO ;", "ghost", 11)
 	resetBtn.Size = UDim2.new(1, 0, 0, 30)
 	resetBtn.LayoutOrder = nextOrder(card)
 	resetBtn.MouseButton1Click:Connect(function()
-		if capturingKey then finishCapture() end
+		if captureId then stopCapture() end
+		local owner = ownerOf(Enum.KeyCode.Semicolon, "cmd")
+		if owner then
+			setStatus("; is used by " .. owner .. ", change that first", C.err)
+			return
+		end
 		cmdKey = Enum.KeyCode.Semicolon
 		saveSettings()
-		keyBtn.Text = keyName(cmdKey)
+		repaint("cmd", false)
 		setStatus("Command bar key: ;", C.muted)
 	end)
 
-	addHint(card, "Your key is remembered between runs when your executor supports saving files.")
+	addHint(card, "Your keys are remembered between runs when your executor supports saving files.")
 
-	local ref = makeCard(right, "Commands")
+	local ref = makeCard(left, "Commands")
 	addHint(ref, table.concat({
 		"goto <player>",
 		"spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
 		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
-		"fullbright  (on|off)",
+		"fullbright  keybinds  (on|off)",
 		"speed <number|reset>  ·  flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"",
 		"Tab = autocomplete   Up / Down = choose   Enter = run",
 	}, "\n"))
+
+	-- RIGHT: master switch, then a key for every feature ---------------------
+	local kcard, khead = makeCard(right, "Keybinds")
+	addSwitch(khead, "keybinds", function(on)
+		KB.on = on
+		saveSettings()
+		setStatus(
+			on and "Keybinds on" or "Keybinds off (window and command bar keys still work)",
+			on and C.ok or C.muted
+		)
+	end)
+	addHint(kcard, "Turns the feature keys below on or off. The window key and the command bar key always work.")
+
+	local pcard = makeCard(right, "Set keybinds")
+	addHint(pcard, "Click a key, then press the new one. Esc cancels, Backspace clears it.")
+
+	for _, def in ipairs(KB.defs) do
+		local row = Instance.new("Frame")
+		row.Name = "Bind_" .. def.id
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 30)
+		row.LayoutOrder = nextOrder(pcard)
+		row.Parent = pcard
+
+		label(row, {
+			Text = def.name,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Size = UDim2.new(1, -108, 1, 0),
+		})
+
+		local b = makeButton(row, labelFor(def.id), "ghost", 11)
+		b.AnchorPoint = Vector2.new(1, 0.5)
+		b.Position = UDim2.new(1, 0, 0.5, 0)
+		b.Size = UDim2.fromOffset(100, 26)
+		buttons[def.id] = b
+		b.MouseButton1Click:Connect(function() startCapture(def.id) end)
+	end
+
+	local resetAll = makeButton(pcard, "RESET ALL KEYS", "ghost", 11)
+	resetAll.Size = UDim2.new(1, 0, 0, 30)
+	resetAll.LayoutOrder = nextOrder(pcard)
+	resetAll.MouseButton1Click:Connect(function()
+		if captureId then stopCapture() end
+		cmdKey = Enum.KeyCode.Semicolon
+		for _, def in ipairs(KB.defs) do
+			KB.binds[def.id] = def.default
+			repaint(def.id, false)
+		end
+		repaint("cmd", false)
+		saveSettings()
+		setStatus("All keys reset", C.muted)
+	end)
 end)()
 
 --------------------------------------------------------------------
@@ -3402,6 +3587,8 @@ end)()
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
+	boolCommand("keybinds", "keybinds", function() return KB.on end,
+		function(v) KB.on = v saveSettings() updateUI() end, "Keybinds")
 
 	add({
 		name = "speed", usage = "speed <number|reset>",
