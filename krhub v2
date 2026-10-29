@@ -2770,6 +2770,40 @@ do
 		emoteBtn.MouseButton1Click:Connect(doEmote)
 	end
 
+	-- Hello (loads your own script, same look as UGC emote)
+	do
+		local card = makeCard(left, "Hello")
+		addHint(card, "Loads your Hello script. Press it again to load a fresh copy.")
+		local helloBtn = makeButton(card, "HELLO", "primary", 12)
+		helloBtn.Name = "HelloButton"
+		helloBtn.Size = UDim2.new(1, 0, 0, 34)
+		helloBtn.LayoutOrder = nextOrder(card)
+
+		local HELLO_URL = "https://pastefy.app/YZoglOyJ/raw"
+		local loadingHello = false
+
+		helloBtn.MouseButton1Click:Connect(function()
+			if loadingHello then return end
+			loadingHello = true
+			helloBtn.Text = "LOADING..."
+			setStatus("Loading Hello...", C.ok)
+
+			task.spawn(function()
+				local ok, err = pcall(function()
+					loadstring(game:HttpGet(HELLO_URL))()
+				end)
+				if ok then
+					setStatus("Hello loaded", C.ok)
+				else
+					warn("Hello failed: " .. tostring(err))
+					setStatus("Hello failed to load", C.err)
+				end
+				helloBtn.Text = "HELLO"
+				loadingHello = false
+			end)
+		end)
+	end
+
 	-- Fly
 	do
 		local card, head = makeCard(right, "Fly")
