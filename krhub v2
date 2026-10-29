@@ -2772,9 +2772,9 @@ do
 
 	-- Hello (loads your own script, same look as UGC emote)
 	do
-		local card = makeCard(left, "Hello")
-		addHint(card, "Loads your Hello script. Press it again to load a fresh copy.")
-		local helloBtn = makeButton(card, "HELLO", "primary", 12)
+		local card = makeCard(left, "Jerk")
+		addHint(card, "A jerk tool.")
+		local helloBtn = makeButton(card, "JERK", "primary", 12)
 		helloBtn.Name = "HelloButton"
 		helloBtn.Size = UDim2.new(1, 0, 0, 34)
 		helloBtn.LayoutOrder = nextOrder(card)
