@@ -605,6 +605,29 @@ local highlights = {}     -- [UserId] = Highlight instance
 local espNames   = true   -- show name tags above ESP'd players
 local nameTags   = {}     -- [UserId] = BillboardGui
 
+local boxCfg = {
+	enabled     = true,
+	style       = "Box",                       -- "Box" or "Corners"
+	color       = Color3.fromRGB(0, 255, 0),   -- box color (green)
+	thickness   = 2,
+	fill        = 0,                           -- box fill opacity, 0-100 %
+	outline     = true,                        -- black outline around the box
+	names       = true,
+	displayName = true,                        -- display name instead of username
+	distance    = true,
+	meters      = false,                       -- false = studs, true = meters
+	health      = true,                        -- health bar on the left
+	tracers     = false,                       -- line from bottom of screen
+	textSize    = 13,
+	textColor   = Color3.fromRGB(255, 255, 255),
+	textSame    = false,                       -- text uses the box color
+	maxDist     = 2000,
+	teamCheck   = false,                       -- hide your teammates
+	teamColor   = false,                       -- use the player's team color
+	rainbow     = false,
+	chams       = false,                       -- old highlight chams (off by default)
+}
+
 local function wantsEsp(p)
 	return espAll or espOn[p.UserId] == true
 end
@@ -769,6 +792,227 @@ task.spawn(function()
 		applyEspToAll()
 	end
 end)
+
+do
+	local old = playerGui:FindFirstChild("KRHUBBoxESP")
+	if old then old:Destroy() end
+
+	local espGui = Instance.new("ScreenGui")
+	espGui.Name = "KRHUBBoxESP"
+	espGui.ResetOnSpawn = false
+	espGui.IgnoreGuiInset = true      -- so WorldToViewportPoint lines up exactly
+	espGui.DisplayOrder = 5
+	espGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	espGui.Parent = playerGui
+
+	local function newFrame(parent, z)
+		local f = Instance.new("Frame")
+		f.BorderSizePixel = 0
+		f.BackgroundColor3 = Color3.new(1, 1, 1)
+		f.ZIndex = z or 1
+		f.Parent = parent
+		return f
+	end
+
+	local function newText(parent)
+		local t = Instance.new("TextLabel")
+		t.BackgroundTransparency = 1
+		t.Font = Enum.Font.GothamBold
+		t.TextStrokeTransparency = 0.2
+		t.TextStrokeColor3 = Color3.new(0, 0, 0)
+		t.Size = UDim2.fromOffset(220, 16)
+		t.ZIndex = 4
+		t.Parent = parent
+		return t
+	end
+
+	local objs = {}   -- [Player] = element table
+
+	local function makeObj()
+		local o = {}
+		o.holder = Instance.new("Frame")
+		o.holder.BackgroundTransparency = 1
+		o.holder.Size = UDim2.fromScale(1, 1)
+		o.holder.Visible = false
+		o.holder.Parent = espGui
+
+		o.outline = newFrame(o.holder, 1)
+		o.outline.BackgroundTransparency = 1
+		o.outlineStroke = Instance.new("UIStroke")
+		o.outlineStroke.Color = Color3.new(0, 0, 0)
+		o.outlineStroke.Parent = o.outline
+
+		o.box = newFrame(o.holder, 2)
+		o.boxStroke = Instance.new("UIStroke")
+		o.boxStroke.Parent = o.box
+
+		o.lines = {}
+		for i = 1, 8 do o.lines[i] = newFrame(o.holder, 2) end
+
+		o.tracer = newFrame(o.holder, 1)
+		o.tracer.AnchorPoint = Vector2.new(0.5, 0.5)
+
+		o.hpBack = newFrame(o.holder, 2)
+		o.hpBack.BackgroundColor3 = Color3.new(0, 0, 0)
+		o.hpFill = newFrame(o.hpBack, 3)
+		o.hpFill.AnchorPoint = Vector2.new(0, 1)
+
+		o.name = newText(o.holder)
+		o.name.AnchorPoint = Vector2.new(0.5, 1)
+		o.dist = newText(o.holder)
+		o.dist.AnchorPoint = Vector2.new(0.5, 0)
+		return o
+	end
+
+	local function destroyObj(p)
+		local o = objs[p]
+		if o then o.holder:Destroy() objs[p] = nil end
+	end
+
+	Players.PlayerRemoving:Connect(destroyObj)
+
+	local function px(n) return math.floor(n + 0.5) end
+
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not gui.Parent then      -- script was re-run: clean up
+			conn:Disconnect()
+			espGui:Destroy()
+			return
+		end
+
+		local cam = workspace.CurrentCamera
+		if not cam then return end
+		local cfg = boxCfg
+		local vp = cam.ViewportSize
+		local camPos = cam.CFrame.Position
+		local rainbow = Color3.fromHSV(tick() % 5 / 5, 1, 1)
+
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p == player then continue end
+
+			local char = p.Character
+			local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+			local hum  = char and char:FindFirstChildOfClass("Humanoid")
+
+			local ok = cfg.enabled and wantsEsp(p) and hrp and hum and hum.Health > 0
+			if ok and cfg.teamCheck and p.Team ~= nil and p.Team == player.Team then ok = false end
+
+			local dist, top, bottom
+			if ok then
+				dist = (camPos - hrp.Position).Magnitude
+				if dist > cfg.maxDist then
+					ok = false
+				else
+					top    = cam:WorldToViewportPoint(hrp.Position + Vector3.new(0, 2.7, 0))
+					bottom = cam:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3.2, 0))
+					if top.Z <= 0 or bottom.Z <= 0 then ok = false end
+				end
+			end
+
+			local o = objs[p]
+			if not ok then
+				if o then o.holder.Visible = false end
+				continue
+			end
+			if not o then o = makeObj() objs[p] = o end
+			o.holder.Visible = true
+
+			-- geometry
+			local h  = math.max(bottom.Y - top.Y, 4)
+			local w  = h * 0.6
+			local cx = top.X
+			local x  = px(cx - w / 2)
+			local y  = px(top.Y)
+			local W, H = px(w), px(h)
+			local t  = cfg.thickness
+
+			-- color
+			local color = cfg.color
+			if cfg.rainbow then
+				color = rainbow
+			elseif cfg.teamColor and p.Team then
+				color = p.TeamColor.Color
+			end
+
+			-- box / corners
+			local boxStyle = cfg.style == "Box"
+			o.box.Visible = boxStyle
+			o.outline.Visible = boxStyle and cfg.outline
+			if boxStyle then
+				o.box.Position = UDim2.fromOffset(x, y)
+				o.box.Size = UDim2.fromOffset(W, H)
+				o.box.BackgroundColor3 = color
+				o.box.BackgroundTransparency = 1 - cfg.fill / 100
+				o.boxStroke.Color = color
+				o.boxStroke.Thickness = t
+				o.outline.Position = o.box.Position
+				o.outline.Size = o.box.Size
+				o.outlineStroke.Thickness = t + 2
+			end
+
+			local L = px(math.min(W, H) * 0.28)
+			local defs = {
+				{x, y, L, t},               {x, y, t, L},                       -- top left
+				{x + W - L, y, L, t},       {x + W - t, y, t, L},               -- top right
+				{x, y + H - t, L, t},       {x, y + H - L, t, L},               -- bottom left
+				{x + W - L, y + H - t, L, t}, {x + W - t, y + H - L, t, L},     -- bottom right
+			}
+			for i, line in ipairs(o.lines) do
+				line.Visible = not boxStyle
+				if not boxStyle then
+					local d = defs[i]
+					line.Position = UDim2.fromOffset(d[1], d[2])
+					line.Size = UDim2.fromOffset(d[3], d[4])
+					line.BackgroundColor3 = color
+				end
+			end
+
+			-- health bar
+			o.hpBack.Visible = cfg.health
+			if cfg.health then
+				local frac = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+				o.hpBack.Position = UDim2.fromOffset(x - 6, y - 1)
+				o.hpBack.Size = UDim2.fromOffset(4, H + 2)
+				o.hpFill.Position = UDim2.new(0, 1, 1, -1)
+				o.hpFill.Size = UDim2.new(1, -2, frac, -2 * frac)
+				o.hpFill.BackgroundColor3 = Color3.fromHSV(frac * 0.33, 1, 1)
+			end
+
+			-- text
+			local tc = cfg.textSame and color or cfg.textColor
+			o.name.Visible = cfg.names
+			if cfg.names then
+				o.name.Text = cfg.displayName and p.DisplayName or p.Name
+				o.name.TextSize = cfg.textSize
+				o.name.TextColor3 = tc
+				o.name.Position = UDim2.fromOffset(px(cx), y - 3)
+			end
+			o.dist.Visible = cfg.distance
+			if cfg.distance then
+				local shown = cfg.meters and dist * 0.28 or dist
+				o.dist.Text = ("[%d %s]"):format(math.floor(shown + 0.5), cfg.meters and "m" or "studs")
+				o.dist.TextSize = math.max(cfg.textSize - 1, 8)
+				o.dist.TextColor3 = tc
+				o.dist.Position = UDim2.fromOffset(px(cx), y + H + 3)
+			end
+
+			-- tracer
+			o.tracer.Visible = cfg.tracers
+			if cfg.tracers then
+				local x1, y1 = vp.X / 2, vp.Y
+				local x2, y2 = cx, y + H
+				local dx, dy = x2 - x1, y2 - y1
+				o.tracer.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), math.max(1, t - 1))
+				o.tracer.Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2)
+				o.tracer.Rotation = math.deg(math.atan2(dy, dx))
+				o.tracer.BackgroundColor3 = color
+			end
+		end
+	end)
+end
+
+
 
 --------------------------------------------------------------------
 -- Teleport logic
@@ -2879,6 +3123,157 @@ do
 end
 
 -- Page: VC ------------------------------------------------------------------
+;(function()
+	local left  = makeColumn(espPage, "left")
+	local right = makeColumn(espPage, "right")
+	local cfg = boxCfg
+
+	-- little helpers ----------------------------------------------------
+	local function toggleRow(card, text, key)
+		local row = Instance.new("Frame")
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 28)
+		row.LayoutOrder = nextOrder(card)
+		row.Parent = card
+		label(row, {
+			Text = text,
+			Font = Enum.Font.GothamMedium,
+			TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, -100, 1, 0),
+		})
+		local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
+		seg.frame.AnchorPoint = Vector2.new(1, 0.5)
+		seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+		seg.onSelect = function(idx) cfg[key] = (idx == 2) end
+		seg.set(cfg[key] and 2 or 1, true)
+		return seg
+	end
+
+	local function sliderRow(card, col, text, minV, maxV, startV, unit, onChange)
+		local r = Instance.new("Frame")
+		r.BackgroundTransparency = 1
+		r.Size = UDim2.new(1, 0, 0, 26)
+		r.LayoutOrder = nextOrder(card)
+		r.Parent = card
+		label(r, {
+			Text = text,
+			Font = Enum.Font.Gotham,
+			TextSize = 12,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, -90, 1, 0),
+		})
+		local box = makeValueBox(r, tostring(startV), unit)
+		return makeSlider(card, col, minV, maxV, startV, box, onChange)
+	end
+
+	local function presetRow(card, presets, onPick)
+		local row = Instance.new("Frame")
+		row.BackgroundTransparency = 1
+		row.Size = UDim2.new(1, 0, 0, 28)
+		row.LayoutOrder = nextOrder(card)
+		row.Parent = card
+		local n = #presets
+		for i, pr in ipairs(presets) do
+			local b = makeButton(row, pr[1], "ghost", 10)
+			b.TextColor3 = pr[2]
+			b.Size = UDim2.new(1 / n, -4, 1, 0)
+			b.Position = UDim2.new((i - 1) / n, 2, 0, 0)
+			b.MouseButton1Click:Connect(function() onPick(pr[2]) end)
+		end
+	end
+
+	local function rgb(c) return math.round(c.R * 255), math.round(c.G * 255), math.round(c.B * 255) end
+
+	-- LEFT ---------------------------------------------------------------
+	do
+		local card, head = makeCard(left, "Box ESP")
+		addSwitch(head, "boxEsp", function(on) cfg.enabled = on end)
+		switches.boxEsp.set(cfg.enabled and 2 or 1, true)
+		addHint(card, "Draws a box, name and distance on every player that has ESP on (ESP everyone, or picked players).")
+
+		local styleBtn = makeButton(card, "STYLE: " .. cfg.style:upper(), "ghost", 12)
+		styleBtn.Size = UDim2.new(1, 0, 0, 34)
+		styleBtn.LayoutOrder = nextOrder(card)
+		styleBtn.MouseButton1Click:Connect(function()
+			cfg.style = (cfg.style == "Box") and "Corners" or "Box"
+			styleBtn.Text = "STYLE: " .. cfg.style:upper()
+		end)
+	end
+
+	do
+		local card = makeCard(left, "Elements")
+		toggleRow(card, "Names", "names")
+		toggleRow(card, "Display name (off = username)", "displayName")
+		toggleRow(card, "Distance", "distance")
+		toggleRow(card, "Distance in meters", "meters")
+		toggleRow(card, "Health bar", "health")
+		toggleRow(card, "Tracers", "tracers")
+		toggleRow(card, "Black outline", "outline")
+	end
+
+	do
+		local card = makeCard(left, "Filters & extras")
+		toggleRow(card, "Hide teammates", "teamCheck")
+		toggleRow(card, "Use team colors", "teamColor")
+		toggleRow(card, "Rainbow", "rainbow")
+		toggleRow(card, "Text uses box color", "textSame")
+		toggleRow(card, "Chams (old highlight)", "chams")
+		addHint(card, "Chams update on the next second tick.")
+	end
+
+	-- RIGHT --------------------------------------------------------------
+	do
+		local card = makeCard(right, "Box color")
+		local rS, gS, bS
+		local function chan(i, v)
+			local r, g, b = rgb(cfg.color)
+			local t = {r, g, b}
+			t[i] = v
+			cfg.color = Color3.fromRGB(t[1], t[2], t[3])
+		end
+		presetRow(card, {
+			{"GREEN",  Color3.fromRGB(0, 255, 0)},
+			{"RED",    Color3.fromRGB(255, 50, 50)},
+			{"CYAN",   Color3.fromRGB(0, 230, 255)},
+			{"YELLOW", Color3.fromRGB(255, 220, 40)},
+			{"WHITE",  Color3.fromRGB(255, 255, 255)},
+		}, function(col)
+			cfg.color = col
+			local r, g, b = rgb(col)
+			rS.set(r) gS.set(g) bS.set(b)
+		end)
+		local r0, g0, b0 = rgb(cfg.color)
+		rS = sliderRow(card, right, "Red",   0, 255, r0, "", function(v) chan(1, v) end)
+		gS = sliderRow(card, right, "Green", 0, 255, g0, "", function(v) chan(2, v) end)
+		bS = sliderRow(card, right, "Blue",  0, 255, b0, "", function(v) chan(3, v) end)
+	end
+
+	do
+		local card = makeCard(right, "Text color")
+		presetRow(card, {
+			{"WHITE",  Color3.fromRGB(255, 255, 255)},
+			{"GREEN",  Color3.fromRGB(0, 255, 0)},
+			{"YELLOW", Color3.fromRGB(255, 220, 40)},
+			{"CYAN",   Color3.fromRGB(0, 230, 255)},
+			{"RED",    Color3.fromRGB(255, 50, 50)},
+		}, function(col)
+			cfg.textColor = col
+			cfg.textSame = false
+		end)
+		addHint(card, "Picking a color here turns off \"Text uses box color\" for new frames.")
+	end
+
+	do
+		local card = makeCard(right, "Size & range")
+		sliderRow(card, right, "Box thickness", 1, 6, cfg.thickness, "px", function(v) cfg.thickness = v end)
+		sliderRow(card, right, "Box fill",      0, 100, cfg.fill, "%", function(v) cfg.fill = v end)
+		sliderRow(card, right, "Text size",     8, 24, cfg.textSize, "px", function(v) cfg.textSize = v end)
+		sliderRow(card, right, "Max distance",  50, 5000, cfg.maxDist, "st", function(v) cfg.maxDist = v end)
+	end
+end)()
+
 do
 	local left  = makeColumn(vcPage, "left")
 	makeColumn(vcPage, "right")
