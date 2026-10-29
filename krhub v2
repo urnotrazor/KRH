@@ -3122,6 +3122,7 @@ end
 	local right = makeColumn(settingsPage, "right")
 
 	local buttons = {}          -- [id] = key button ("cmd" = the command bar key)
+	local unbinds = {}          -- [id] = the small x button that clears a key
 	local captureId, captureConn
 
 	local function labelFor(id)
@@ -3133,6 +3134,11 @@ end
 	local function repaint(id, listening)
 		local b = buttons[id]
 		if b then setToggleStyle(b, listening, "Press a key...", labelFor(id)) end
+		-- the x button is only bright while the feature actually has a key
+		local u = unbinds[id]
+		if u then
+			tween(u, 0.15, {TextColor3 = KB.binds[id] and C.text or C.faint})
+		end
 	end
 
 	local function nameOf(id)
@@ -3275,7 +3281,7 @@ end
 	addHint(kcard, "Turns the feature keys below on or off. The window key and the command bar key always work.")
 
 	local pcard = makeCard(right, "Set keybinds")
-	addHint(pcard, "Click a key, then press the new one. Esc cancels, Backspace clears it.")
+	addHint(pcard, "Click a key, then press the new one. Esc cancels. Press × to unbind a key (Backspace works too).")
 
 	for _, def in ipairs(KB.defs) do
 		local row = Instance.new("Frame")
@@ -3291,15 +3297,36 @@ end
 			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Size = UDim2.new(1, -108, 1, 0),
+			Size = UDim2.new(1, -140, 1, 0),
 		})
 
+		-- key button (click, then press a key)
 		local b = makeButton(row, labelFor(def.id), "ghost", 11)
 		b.AnchorPoint = Vector2.new(1, 0.5)
-		b.Position = UDim2.new(1, 0, 0.5, 0)
+		b.Position = UDim2.new(1, -32, 0.5, 0)
 		b.Size = UDim2.fromOffset(100, 26)
 		buttons[def.id] = b
 		b.MouseButton1Click:Connect(function() startCapture(def.id) end)
+
+		-- unbind button: clears the key in one click
+		local u = makeButton(row, "×", "ghost", 16)
+		u.Name = "UnbindButton"
+		u.AnchorPoint = Vector2.new(1, 0.5)
+		u.Position = UDim2.new(1, 0, 0.5, 0)
+		u.Size = UDim2.fromOffset(26, 26)
+		u.TextColor3 = KB.binds[def.id] and C.text or C.faint
+		unbinds[def.id] = u
+		u.MouseButton1Click:Connect(function()
+			if captureId == def.id then stopCapture() end
+			if not KB.binds[def.id] then
+				setStatus(def.name .. " has no key", C.muted)
+				return
+			end
+			KB.binds[def.id] = false
+			repaint(def.id, false)
+			saveSettings()
+			setStatus(def.name .. " key cleared", C.muted)
+		end)
 	end
 
 	local resetAll = makeButton(pcard, "RESET ALL KEYS", "ghost", 11)
