@@ -8,6 +8,7 @@
 	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
 	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed,
 	             fullbright (also removes fog, shadows, effects).
+	  ESP      - every ESP option: box, one name tag, distance, health, line to player, colors.
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
 	  Settings - turn keybinds on / off and change every key.
@@ -392,6 +393,7 @@ local TAB_DEFS = {
 	{key = "Normal",   text = "Teleport", width = 62},
 	{key = "Friends",  text = "Friends",  width = 54},
 	{key = "All",      text = "Misc",     width = 42},
+	{key = "ESP",      text = "ESP",      width = 38},
 	{key = "Tools",    text = "Tools",    width = 46},
 	{key = "VC",       text = "VC",       width = 34},
 	{key = "Settings", text = "Settings", width = 58},
@@ -605,27 +607,29 @@ local highlights = {}     -- [UserId] = Highlight instance
 local espNames   = true   -- show name tags above ESP'd players
 local nameTags   = {}     -- [UserId] = BillboardGui
 
+-- Box ESP settings (everything on the ESP tab edits this table)
 local boxCfg = {
-	enabled     = true,
-	style       = "Box",                       -- "Box" or "Corners"
-	color       = Color3.fromRGB(0, 255, 0),   -- box color (green)
-	thickness   = 2,
-	fill        = 0,                           -- box fill opacity, 0-100 %
-	outline     = true,                        -- black outline around the box
-	names       = true,
-	displayName = true,                        -- display name instead of username
-	distance    = true,
-	meters      = false,                       -- false = studs, true = meters
-	health      = true,                        -- health bar on the left
-	tracers     = false,                       -- line from bottom of screen
-	textSize    = 13,
-	textColor   = Color3.fromRGB(255, 255, 255),
-	textSame    = false,                       -- text uses the box color
-	maxDist     = 2000,
-	teamCheck   = false,                       -- hide your teammates
-	teamColor   = false,                       -- use the player's team color
-	rainbow     = false,
-	chams       = false,                       -- old highlight chams (off by default)
+	enabled         = true,
+	style           = "Box",                     -- "Box" or "Corners"
+	color           = Color3.fromRGB(0, 255, 0),
+	thickness       = 2,
+	fill            = 0,                         -- box fill opacity, 0-100 %
+	outline         = true,                      -- black outline around the box
+	displayName     = true,                      -- display name instead of username
+	distance        = true,
+	meters          = false,                     -- false = studs, true = meters
+	health          = true,                      -- health bar on the left
+	tracers         = true,                      -- line between you and the other player
+	tracerFrom      = "Player",                  -- "Player" (your character), "Bottom" or "Center"
+	tracerThickness = 1,
+	textSize        = 13,
+	textColor       = Color3.fromRGB(255, 255, 255),
+	textSame        = false,                     -- text uses the box color
+	maxDist         = 2000,
+	teamCheck       = false,                     -- hide your teammates
+	teamColor       = false,                     -- use the player's team color
+	rainbow         = false,
+	chams           = false,                     -- old highlight chams (off by default)
 }
 
 local function wantsEsp(p)
@@ -638,7 +642,7 @@ local function applyHighlight(p)
 	local hl   = highlights[p.UserId]
 	local char = p.Character
 
-	if wantsEsp(p) and char and p.Parent then
+	if wantsEsp(p) and boxCfg.chams and char and p.Parent then
 		if not hl or hl.Parent ~= char then
 			if hl then hl:Destroy() end
 			hl = Instance.new("Highlight")
@@ -665,7 +669,8 @@ local function applyNameTag(p)
 	local char = p.Character
 	local part = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
 
-	if espNames and wantsEsp(p) and char and part and p.Parent then
+	-- the Box ESP draws its own name, so this old tag only shows when Box ESP is off (never two names)
+	if espNames and wantsEsp(p) and not boxCfg.enabled and char and part and p.Parent then
 		if not tag or tag.Parent ~= char then
 			if tag then tag:Destroy() end
 			tag = Instance.new("BillboardGui")
@@ -793,6 +798,10 @@ task.spawn(function()
 	end
 end)
 
+--------------------------------------------------------------------
+-- Box ESP: box / corners, ONE name, distance, health bar, and a line
+-- from you to the other player (old-school CS style)
+--------------------------------------------------------------------
 do
 	local old = playerGui:FindFirstChild("KRHUBBoxESP")
 	if old then old:Destroy() end
@@ -801,7 +810,7 @@ do
 	espGui.Name = "KRHUBBoxESP"
 	espGui.ResetOnSpawn = false
 	espGui.IgnoreGuiInset = true      -- so WorldToViewportPoint lines up exactly
-	espGui.DisplayOrder = 5
+	espGui.DisplayOrder = -1          -- under the KRHUB window and the game's own UI
 	espGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	espGui.Parent = playerGui
 
@@ -887,6 +896,18 @@ do
 		local vp = cam.ViewportSize
 		local camPos = cam.CFrame.Position
 		local rainbow = Color3.fromHSV(tick() % 5 / 5, 1, 1)
+
+		-- where the lines start: your own character on screen (or bottom / center)
+		local ox, oy = vp.X / 2, vp.Y
+		if cfg.tracerFrom == "Center" then
+			ox, oy = vp.X / 2, vp.Y / 2
+		elseif cfg.tracerFrom == "Player" then
+			local myRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			if myRoot then
+				local v = cam:WorldToViewportPoint(myRoot.Position)
+				if v.Z > 0 then ox, oy = v.X, v.Y end
+			end
+		end
 
 		for _, p in ipairs(Players:GetPlayers()) do
 			if p == player then continue end
@@ -979,10 +1000,10 @@ do
 				o.hpFill.BackgroundColor3 = Color3.fromHSV(frac * 0.33, 1, 1)
 			end
 
-			-- text
+			-- text (the ONE name tag; the "ESP names" switch controls it)
 			local tc = cfg.textSame and color or cfg.textColor
-			o.name.Visible = cfg.names
-			if cfg.names then
+			o.name.Visible = espNames
+			if espNames then
 				o.name.Text = cfg.displayName and p.DisplayName or p.Name
 				o.name.TextSize = cfg.textSize
 				o.name.TextColor3 = tc
@@ -997,13 +1018,13 @@ do
 				o.dist.Position = UDim2.fromOffset(px(cx), y + H + 3)
 			end
 
-			-- tracer
+			-- line between you and the other player
 			o.tracer.Visible = cfg.tracers
 			if cfg.tracers then
-				local x1, y1 = vp.X / 2, vp.Y
-				local x2, y2 = cx, y + H
+				local x1, y1 = ox, oy
+				local x2, y2 = cx, (cfg.tracerFrom == "Player") and (y + H / 2) or (y + H)
 				local dx, dy = x2 - x1, y2 - y1
-				o.tracer.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), math.max(1, t - 1))
+				o.tracer.Size = UDim2.fromOffset(math.sqrt(dx * dx + dy * dy), cfg.tracerThickness)
 				o.tracer.Position = UDim2.fromOffset((x1 + x2) / 2, (y1 + y2) / 2)
 				o.tracer.Rotation = math.deg(math.atan2(dy, dx))
 				o.tracer.BackgroundColor3 = color
@@ -1011,8 +1032,6 @@ do
 		end
 	end)
 end
-
-
 
 --------------------------------------------------------------------
 -- Teleport logic
@@ -2060,6 +2079,7 @@ local allPage     = newPage(false)
 local toolsPage   = newPage(false)
 local vcPage      = newPage(false)
 local settingsPage = newPage(false)
+local espPage      = newPage(false)
 
 -- Page: Teleport (input + player card) -------------------------------
 ;(function()
@@ -2866,7 +2886,7 @@ do
 		addSwitch(head, "espAll", function(on)
 			if on ~= espAll then setEspAll(on) end
 		end)
-		addHint(card, "Chams on every player in the server.")
+		addHint(card, "ESP on every player in the server (box, name, distance, health, line). All options are in the ESP tab.")
 	end
 
 	-- ESP names
@@ -3122,14 +3142,14 @@ do
 	end
 end
 
--- Page: VC ------------------------------------------------------------------
+-- Page: ESP (all the ESP settings) ------------------------------------------
 ;(function()
 	local left  = makeColumn(espPage, "left")
 	local right = makeColumn(espPage, "right")
 	local cfg = boxCfg
 
-	-- little helpers ----------------------------------------------------
-	local function toggleRow(card, text, key)
+	-- a row with a label and an OFF / ON switch
+	local function switchRow(card, text, switchKey, onChange)
 		local row = Instance.new("Frame")
 		row.BackgroundTransparency = 1
 		row.Size = UDim2.new(1, 0, 0, 28)
@@ -3140,12 +3160,26 @@ end
 			Font = Enum.Font.GothamMedium,
 			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			Size = UDim2.new(1, -100, 1, 0),
 		})
 		local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
 		seg.frame.AnchorPoint = Vector2.new(1, 0.5)
 		seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
-		seg.onSelect = function(idx) cfg[key] = (idx == 2) end
+		seg.onSelect = function(idx)
+			onChange(idx == 2)
+			if updateUI then updateUI() end
+		end
+		if switchKey then switches[switchKey] = seg end
+		return seg
+	end
+
+	-- a switch that edits one value in boxCfg
+	local function cfgRow(card, text, key, after)
+		local seg = switchRow(card, text, nil, function(on)
+			cfg[key] = on
+			if after then after() end
+		end)
 		seg.set(cfg[key] and 2 or 1, true)
 		return seg
 	end
@@ -3188,10 +3222,27 @@ end
 
 	-- LEFT ---------------------------------------------------------------
 	do
+		local card, head = makeCard(left, "ESP everyone")
+		addSwitch(head, "espAll_tab", function(on)
+			if on ~= espAll then setEspAll(on) end
+		end)
+		addHint(card, "Turns ESP on for every player. For single players use the Teleport / Friends tabs or the esp <player> command.")
+		switchRow(card, "Names (one tag above the box)", "espNames_tab", function(on)
+			if on ~= espNames then setEspNames(on) end
+		end)
+		local clearBtn = makeButton(card, "CLEAR ALL ESP", "ghost", 12)
+		clearBtn.Size = UDim2.new(1, 0, 0, 34)
+		clearBtn.LayoutOrder = nextOrder(card)
+		clearBtn.MouseButton1Click:Connect(clearAllEsp)
+	end
+
+	do
 		local card, head = makeCard(left, "Box ESP")
-		addSwitch(head, "boxEsp", function(on) cfg.enabled = on end)
-		switches.boxEsp.set(cfg.enabled and 2 or 1, true)
-		addHint(card, "Draws a box, name and distance on every player that has ESP on (ESP everyone, or picked players).")
+		addSwitch(head, "boxEsp", function(on)
+			cfg.enabled = on
+			applyEspToAll()
+		end)
+		addHint(card, "Draws the box, name, distance and health on every player that has ESP on.")
 
 		local styleBtn = makeButton(card, "STYLE: " .. cfg.style:upper(), "ghost", 12)
 		styleBtn.Size = UDim2.new(1, 0, 0, 34)
@@ -3204,23 +3255,41 @@ end
 
 	do
 		local card = makeCard(left, "Elements")
-		toggleRow(card, "Names", "names")
-		toggleRow(card, "Display name (off = username)", "displayName")
-		toggleRow(card, "Distance", "distance")
-		toggleRow(card, "Distance in meters", "meters")
-		toggleRow(card, "Health bar", "health")
-		toggleRow(card, "Tracers", "tracers")
-		toggleRow(card, "Black outline", "outline")
+		cfgRow(card, "Display name (off = username)", "displayName")
+		cfgRow(card, "Distance", "distance")
+		cfgRow(card, "Distance in meters", "meters")
+		cfgRow(card, "Health bar", "health")
+		cfgRow(card, "Black outline", "outline")
+	end
+
+	do
+		local card, head = makeCard(left, "Line to player")
+		addSwitch(head, "boxTracers", function(on) cfg.tracers = on end)
+		addHint(card, "Draws a line between you and every ESP'd player, like the old CS cheats.")
+
+		local ORIGINS = {"Player", "Bottom", "Center"}
+		local ORIGIN_TEXT = {Player = "MY PLAYER", Bottom = "BOTTOM OF SCREEN", Center = "CENTER OF SCREEN"}
+		local originBtn = makeButton(card, "STARTS AT: " .. ORIGIN_TEXT[cfg.tracerFrom], "ghost", 12)
+		originBtn.Size = UDim2.new(1, 0, 0, 34)
+		originBtn.LayoutOrder = nextOrder(card)
+		originBtn.MouseButton1Click:Connect(function()
+			local i = table.find(ORIGINS, cfg.tracerFrom) or 1
+			cfg.tracerFrom = ORIGINS[i % #ORIGINS + 1]
+			originBtn.Text = "STARTS AT: " .. ORIGIN_TEXT[cfg.tracerFrom]
+		end)
+
+		sliderRow(card, left, "Line thickness", 1, 6, cfg.tracerThickness, "px", function(v)
+			cfg.tracerThickness = v
+		end)
 	end
 
 	do
 		local card = makeCard(left, "Filters & extras")
-		toggleRow(card, "Hide teammates", "teamCheck")
-		toggleRow(card, "Use team colors", "teamColor")
-		toggleRow(card, "Rainbow", "rainbow")
-		toggleRow(card, "Text uses box color", "textSame")
-		toggleRow(card, "Chams (old highlight)", "chams")
-		addHint(card, "Chams update on the next second tick.")
+		cfgRow(card, "Hide teammates", "teamCheck")
+		cfgRow(card, "Use team colors", "teamColor")
+		cfgRow(card, "Rainbow", "rainbow")
+		cfgRow(card, "Text uses box color", "textSame")
+		cfgRow(card, "Chams (old highlight)", "chams", applyEspToAll)
 	end
 
 	-- RIGHT --------------------------------------------------------------
@@ -3274,6 +3343,7 @@ end
 	end
 end)()
 
+-- Page: VC ------------------------------------------------------------------
 do
 	local left  = makeColumn(vcPage, "left")
 	makeColumn(vcPage, "right")
@@ -3307,6 +3377,10 @@ updateUI = function()
 	sw("clickTp", clickTpOn)
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
+	sw("boxEsp", boxCfg.enabled)
+	sw("boxTracers", boxCfg.tracers)
+	sw("espAll_tab", espAll)
+	sw("espNames_tab", espNames)
 
 	-- player card
 	local onCardSpec = spectating ~= nil and spectating == currentMatch
@@ -3376,8 +3450,8 @@ refreshFriends()
 --------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, Tools = 4, VC = 5, Settings = 6}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, Tools = toolsPage, VC = vcPage, Settings = settingsPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Tools = 5, VC = 6, Settings = 7}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Tools = toolsPage, VC = vcPage, Settings = settingsPage}
 
 local function paintTabs(name)
 	for key, btn in pairs(TAB_BUTTONS) do
@@ -4086,18 +4160,18 @@ end)()
 		run = function() doEmote() return true, "Loading UGC emote..." end,
 	})
 
-	local TAB_NAMES = {teleport = "Normal", friends = "Friends", misc = "All", tools = "Tools", settings = "Settings"}
+	local TAB_NAMES = {teleport = "Normal", friends = "Friends", misc = "All", esp = "ESP", tools = "Tools", settings = "Settings"}
 	add({
-		name = "tab", usage = "tab teleport|friends|misc|tools|settings",
+		name = "tab", usage = "tab teleport|friends|misc|esp|tools|settings",
 		suggest = function()
 			return {
-				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""},
+				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""},
 				{text = "tools", desc = ""}, {text = "settings", desc = ""},
 			}
 		end,
 		run = function(arg)
 			local key = TAB_NAMES[arg:lower()]
-			if not key then return false, "Usage: tab teleport|friends|misc|tools|settings" end
+			if not key then return false, "Usage: tab teleport|friends|misc|esp|tools|settings" end
 			setVisible(true)
 			switchTab(key)
 			return true, "Opened " .. arg:lower()
