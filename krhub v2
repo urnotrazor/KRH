@@ -1190,9 +1190,9 @@ end
 local freecamOn = false
 local startFreecam, toggleFreecam
 do
-local FC_MIN, FC_MAX = 5, 300
 local fcSpeed = 50
 local fcConn
+local fcOrigFov, fcFov, fcTarget = 70, 70, 70   -- field of view: before freecam, now, wanted
 local fcPos = Vector3.zero
 local fcPitch, fcYaw = 0, 0
 
@@ -1214,6 +1214,8 @@ startFreecam = function()
 	local rx, ry = cam.CFrame:ToOrientation()
 	fcPitch, fcYaw = math.deg(rx), math.deg(ry)
 	fcPos = cam.CFrame.Position
+	fcOrigFov = cam.FieldOfView
+	fcFov, fcTarget = fcOrigFov, fcOrigFov
 	cam.CameraType = Enum.CameraType.Scriptable
 
 	local controls = getControls()
@@ -1232,10 +1234,15 @@ startFreecam = function()
 			and Enum.MouseBehavior.LockCurrentPosition
 			or Enum.MouseBehavior.Default
 
+		-- cinematic zoom: ease the field of view toward the wanted value
+		fcFov += (fcTarget - fcFov) * (1 - math.exp(-9 * dt))
+		c.FieldOfView = fcFov
+
 		if looking then
 			local d = UserInputService:GetMouseDelta()
-			fcYaw -= d.X * 0.25
-			fcPitch = math.clamp(fcPitch - d.Y * 0.25, -85, 85)
+			local sens = 0.25 * (fcFov / fcOrigFov)   -- finer aiming while zoomed in
+			fcYaw -= d.X * sens
+			fcPitch = math.clamp(fcPitch - d.Y * sens, -85, 85)
 		end
 
 		local rot = CFrame.fromOrientation(math.rad(fcPitch), math.rad(fcYaw), 0)
@@ -1252,10 +1259,11 @@ startFreecam = function()
 			if UserInputService:IsKeyDown(Enum.KeyCode.E) then vertical += 1 end
 			if UserInputService:IsKeyDown(Enum.KeyCode.Q) then vertical -= 1 end
 
-			local boost = (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-				or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) and 3 or 1
+			-- hold Shift to creep slowly
+			local slow = (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+				or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) and 0.2 or 1
 			local velocity = rot:VectorToWorldSpace(move) + Vector3.new(0, vertical, 0)
-			fcPos += velocity * fcSpeed * boost * dt
+			fcPos += velocity * fcSpeed * slow * dt
 		end
 
 		c.CFrame = CFrame.new(fcPos) * rot
@@ -1274,6 +1282,7 @@ stopFreecam = function(silent)
 	local cam = workspace.CurrentCamera
 	if cam then
 		cam.CameraType = Enum.CameraType.Custom
+		cam.FieldOfView = fcOrigFov
 		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 		if hum then cam.CameraSubject = hum end
 	end
@@ -1291,9 +1300,11 @@ end
 
 UserInputService.InputChanged:Connect(function(input, processed)
 	if freecamOn and not processed and input.UserInputType == Enum.UserInputType.MouseWheel then
-		local factor = input.Position.Z > 0 and 1.15 or (1 / 1.15)
-		fcSpeed = math.clamp(fcSpeed * factor, FC_MIN, FC_MAX)
-		setStatus("Freecam speed: " .. math.floor(fcSpeed + 0.5), C.muted)
+		-- scroll up = zoom in, scroll down = zoom out
+		local factor = input.Position.Z > 0 and (1 / 1.12) or 1.12
+		fcTarget = math.clamp(fcTarget * factor, 8, 110)
+		local zoom = math.tan(math.rad(fcOrigFov) / 2) / math.tan(math.rad(fcTarget) / 2)
+		setStatus(("Zoom %.1fx"):format(zoom), C.muted)
 	end
 end)
 end
