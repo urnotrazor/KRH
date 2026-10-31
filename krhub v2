@@ -2302,8 +2302,12 @@ KB.started = false
 KB.lastJson = ""
 
 function KB.canSave()
-	return typeof(isfile) == "function" and typeof(readfile) == "function" and typeof(writefile) == "function"
+	return typeof(writefile) == "function"
 end
+function KB.canLoad()
+	return typeof(readfile) == "function"
+end
+KB.report = function() end   -- the Settings tab replaces this to show the save status
 
 -- what gets written to the file (colors become {r, g, b} numbers)
 function KB.snapshot()
@@ -2333,21 +2337,41 @@ end
 
 -- writes the file when something changed (or always when force = true)
 function KB.flush(force)
-	if not KB.started or not KB.canSave() then return end
+	if not KB.started then return end
+	if not KB.canSave() then return end
 	local ok, json = pcall(function() return KB.http:JSONEncode(KB.snapshot()) end)
-	if ok and (force or json ~= KB.lastJson) then
-		if pcall(writefile, SAVE_FILE, json) then KB.lastJson = json end
+	if not ok then
+		warn("KRHUB save failed (encode): " .. tostring(json))
+		KB.report("Save failed: " .. tostring(json), false)
+		return
+	end
+	if force or json ~= KB.lastJson then
+		local wok, werr = pcall(writefile, SAVE_FILE, json)
+		if wok then
+			KB.lastJson = json
+			KB.report("Saved at " .. os.date("%H:%M:%S") .. " (" .. SAVE_FILE .. ")", true)
+		else
+			warn("KRHUB save failed (write): " .. tostring(werr))
+			KB.report("Save failed: " .. tostring(werr), false)
+		end
 	end
 end
 
 -- read the file now, before the pages are built, so every switch starts right
 do
 	pcall(function()
-		if not KB.canSave() then return end
-		-- falls back to the old shared file once, so your keys carry over
-		local path = (isfile(SAVE_FILE) and SAVE_FILE) or (isfile(SETTINGS_FILE) and SETTINGS_FILE)
-		if not path then return end
-		local data = KB.http:JSONDecode(readfile(path))
+		if not KB.canLoad() then return end
+		-- this account's file first, then the old shared file once so your keys carry over
+		local raw
+		for _, path in ipairs({SAVE_FILE, SETTINGS_FILE}) do
+			local okr, text = pcall(readfile, path)
+			if okr and type(text) == "string" and text ~= "" then
+				raw = text
+				break
+			end
+		end
+		if not raw then return end
+		local data = KB.http:JSONDecode(raw)
 		if type(data) ~= "table" then return end
 
 		local function code(name)
@@ -2414,6 +2438,9 @@ function KB.start()
 	if r.freecam then startFreecam() end
 
 	KB.started = true
+	if not KB.canSave() then
+		KB.report("Can't save: your executor has no writefile function.", false)
+	end
 	KB.flush(true)
 	task.spawn(function()
 		while gui.Parent do
@@ -3789,6 +3816,32 @@ end
 	end)
 
 	addHint(card, "Your keys, the ESP tab and the Freecam / Anti-AFK switches are saved for each Roblox account (needs an executor with file saving). Fullbright, walk speed and the Tools tab are not saved.")
+
+	local scard = makeCard(left, "Saving")
+	local saveInfo = label(scard, {
+		Text = "Starting...",
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = nextOrder(scard),
+	})
+	KB.report = function(text, ok)
+		saveInfo.Text = text
+		saveInfo.TextColor3 = ok and C.mint or C.err
+	end
+	local saveBtn = makeButton(scard, "SAVE NOW", "ghost", 12)
+	saveBtn.Size = UDim2.new(1, 0, 0, 34)
+	saveBtn.LayoutOrder = nextOrder(scard)
+	saveBtn.MouseButton1Click:Connect(function()
+		if not KB.started then return end
+		KB.flush(true)
+		setStatus("Save requested", C.muted)
+	end)
 
 	local ref = makeCard(left, "Commands")
 	addHint(ref, table.concat({
