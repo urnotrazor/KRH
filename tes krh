@@ -329,7 +329,7 @@ local extraScales = {}   -- other UIScale objects that follow the same size (com
 local function getUiScale()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-	local s = math.clamp(vp.Y / 1080, 1, 2) * 1.25 * uiMul
+	local s = math.clamp(vp.Y / 1080, 1, 2) * uiMul
 	-- never bigger than the screen
 	s = math.min(s, vp.Y * 0.92 / FULL_SIZE.Y.Offset, vp.X * 0.95 / FULL_SIZE.X.Offset)
 	return math.max(s, 0.6)
@@ -2473,7 +2473,7 @@ do
 		end
 
 		if type(data.antiAfk) == "boolean" then KB.restore.antiAfk = data.antiAfk end
-		if type(data.uiSize) == "number" then uiMul = math.clamp(data.uiSize, 70, 250) / 100 end
+		if type(data.uiSize) == "number" then uiMul = math.clamp(data.uiSize, 50, 250) / 100 end
 		KB.restore.freecam = data.freecam == true
 
 		local esp = data.esp
@@ -3681,10 +3681,10 @@ end
 
 	-- Interface size: automatic from your screen, plus this slider on top
 	local szCard = makeCard(left, "Interface size")
-	UI.sliderRow(szCard, left, "UI size", 70, 250, math.round(uiMul * 100), "%",
+	UI.sliderRow(szCard, left, "UI size", 50, 250, math.round(uiMul * 100), "%",
 		function(v) uiMul = v / 100 end,
 		function() applyUiScale() saveSettings() end)
-	addHint(szCard, "Starts automatic for your screen. Raise it if text is still small.")
+	addHint(szCard, "Starts automatic for your screen. Lower it if it's too big, raise it if text is too small.")
 
 	local scard = makeCard(left, "Saving")
 	local srow = Instance.new("Frame")
