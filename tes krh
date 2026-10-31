@@ -329,7 +329,7 @@ local extraScales = {}   -- other UIScale objects that follow the same size (com
 local function getUiScale()
 	local cam = workspace.CurrentCamera
 	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-	local s = math.clamp(vp.Y / 1080, 1, 2) * uiMul
+	local s = (1 + (math.clamp(vp.Y / 1080, 1, 2) - 1) * 0.5) * uiMul   -- FHD 1.0x, 2K ~1.2x, 4K 1.5x
 	-- never bigger than the screen
 	s = math.min(s, vp.Y * 0.92 / FULL_SIZE.Y.Offset, vp.X * 0.95 / FULL_SIZE.X.Offset)
 	return math.max(s, 0.6)
