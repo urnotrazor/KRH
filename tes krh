@@ -6,10 +6,10 @@
 	  Teleport - type a name; the player card has TELEPORT / SPECTATE / ESP.
 	  Friends  - friends in your server, in other servers of this game, and in other
 	             games (JOIN follows them, retrying while the server is full).
-	  Player   - fly, noclip, freecam, click teleport, speeds, fullbright, Anti-AFK,
+	  Player   - fly, noclip, invisible, freecam, click teleport, speeds, fullbright, Anti-AFK,
 	             the REJOIN / UGC EMOTE / HELLO buttons, and the Voice chat card.
 	  ESP      - every ESP option: box, name, distance, health, line, colors.
-	  Settings - command bar key, interface size, per-feature keybinds, saving, command list.
+	  Settings - command bar key, per-feature keybinds, saving, command list.
 
 	Command bar: press ; (rebindable) and type goto <name>, esp on, fly, ...
 	Drag the title bar or the bar under the panel to move; the corner grip resizes.
@@ -322,34 +322,6 @@ stroke(main, C.cardStroke, 1, 0)
 local mainScale = Instance.new("UIScale")
 mainScale.Scale = 0
 mainScale.Parent = main
-
--- UI size: automatic from your screen height, times the slider in Settings
-local uiMul = 1
-local extraScales = {}   -- other UIScale objects that follow the same size (command bar)
-local function getUiScale()
-	local cam = workspace.CurrentCamera
-	local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-	local s = (1 + (math.clamp(vp.Y / 1080, 1, 2) - 1) * 0.5) * uiMul   -- FHD 1.0x, 2K ~1.2x, 4K 1.5x
-	-- never bigger than the screen
-	s = math.min(s, vp.Y * 0.92 / FULL_SIZE.Y.Offset, vp.X * 0.95 / FULL_SIZE.X.Offset)
-	return math.max(s, 0.6)
-end
-local function applyUiScale()
-	local s = getUiScale()
-	for _, u in ipairs(extraScales) do u.Scale = s end
-	if main.Visible and mainScale.Scale > 0.05 then
-		tween(mainScale, 0.15, {Scale = s})
-	end
-end
-local function watchViewport()
-	local cam = workspace.CurrentCamera
-	if cam then cam:GetPropertyChangedSignal("ViewportSize"):Connect(applyUiScale) end
-end
-watchViewport()
-workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-	watchViewport()
-	applyUiScale()
-end)
 
 -- Title bar ---------------------------------------------------------
 local titleBar = Instance.new("Frame")
@@ -885,9 +857,6 @@ do
 		o.name.AnchorPoint = Vector2.new(0.5, 1)
 		o.dist = newText(o.holder)
 		o.dist.AnchorPoint = Vector2.new(0.5, 0)
-		-- the text boxes are fixed-height, so pin the text to the box edge nearest the player
-		o.name.TextYAlignment = Enum.TextYAlignment.Bottom
-		o.dist.TextYAlignment = Enum.TextYAlignment.Top
 		return o
 	end
 
@@ -914,7 +883,6 @@ do
 		local vp = cam.ViewportSize
 		local camPos = cam.CFrame.Position
 		local rainbow = Color3.fromHSV(tick() % 5 / 5, 1, 1)
-		local espK = getUiScale()   -- ESP text grows with the screen, like the window
 
 		-- where the lines start: your own character on screen (or bottom / center)
 		local ox, oy = vp.X / 2, vp.Y
@@ -1024,7 +992,7 @@ do
 			o.name.Visible = espNames
 			if espNames then
 				o.name.Text = cfg.displayName and p.DisplayName or p.Name
-				o.name.TextSize = math.round(cfg.textSize * espK)
+				o.name.TextSize = cfg.textSize
 				o.name.TextColor3 = tc
 				o.name.Position = UDim2.fromOffset(px(cx), y - 3)
 			end
@@ -1032,7 +1000,7 @@ do
 			if cfg.distance then
 				local shown = cfg.meters and dist * 0.28 or dist
 				o.dist.Text = ("[%d %s]"):format(math.floor(shown + 0.5), cfg.meters and "m" or "studs")
-				o.dist.TextSize = math.round(math.max(cfg.textSize - 1, 8) * espK)
+				o.dist.TextSize = math.max(cfg.textSize - 1, 8)
 				o.dist.TextColor3 = tc
 				o.dist.Position = UDim2.fromOffset(px(cx), y + H + 3)
 			end
@@ -1222,9 +1190,9 @@ end
 local freecamOn = false
 local startFreecam, toggleFreecam
 do
-local FC_MIN, FC_MAX = 5, 300
 local fcSpeed = 50
 local fcConn
+local fcOrigFov, fcFov, fcTarget = 70, 70, 70   -- field of view: before freecam, now, wanted
 local fcPos = Vector3.zero
 local fcPitch, fcYaw = 0, 0
 
@@ -1246,6 +1214,8 @@ startFreecam = function()
 	local rx, ry = cam.CFrame:ToOrientation()
 	fcPitch, fcYaw = math.deg(rx), math.deg(ry)
 	fcPos = cam.CFrame.Position
+	fcOrigFov = cam.FieldOfView
+	fcFov, fcTarget = fcOrigFov, fcOrigFov
 	cam.CameraType = Enum.CameraType.Scriptable
 
 	local controls = getControls()
@@ -1264,10 +1234,15 @@ startFreecam = function()
 			and Enum.MouseBehavior.LockCurrentPosition
 			or Enum.MouseBehavior.Default
 
+		-- cinematic zoom: ease the field of view toward the wanted value
+		fcFov += (fcTarget - fcFov) * (1 - math.exp(-9 * dt))
+		c.FieldOfView = fcFov
+
 		if looking then
 			local d = UserInputService:GetMouseDelta()
-			fcYaw -= d.X * 0.25
-			fcPitch = math.clamp(fcPitch - d.Y * 0.25, -85, 85)
+			local sens = 0.25 * (fcFov / fcOrigFov)   -- finer aiming while zoomed in
+			fcYaw -= d.X * sens
+			fcPitch = math.clamp(fcPitch - d.Y * sens, -85, 85)
 		end
 
 		local rot = CFrame.fromOrientation(math.rad(fcPitch), math.rad(fcYaw), 0)
@@ -1284,10 +1259,11 @@ startFreecam = function()
 			if UserInputService:IsKeyDown(Enum.KeyCode.E) then vertical += 1 end
 			if UserInputService:IsKeyDown(Enum.KeyCode.Q) then vertical -= 1 end
 
-			local boost = (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
-				or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) and 3 or 1
+			-- hold Shift to creep slowly
+			local slow = (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+				or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) and 0.2 or 1
 			local velocity = rot:VectorToWorldSpace(move) + Vector3.new(0, vertical, 0)
-			fcPos += velocity * fcSpeed * boost * dt
+			fcPos += velocity * fcSpeed * slow * dt
 		end
 
 		c.CFrame = CFrame.new(fcPos) * rot
@@ -1306,6 +1282,7 @@ stopFreecam = function(silent)
 	local cam = workspace.CurrentCamera
 	if cam then
 		cam.CameraType = Enum.CameraType.Custom
+		cam.FieldOfView = fcOrigFov
 		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
 		if hum then cam.CameraSubject = hum end
 	end
@@ -1323,9 +1300,11 @@ end
 
 UserInputService.InputChanged:Connect(function(input, processed)
 	if freecamOn and not processed and input.UserInputType == Enum.UserInputType.MouseWheel then
-		local factor = input.Position.Z > 0 and 1.15 or (1 / 1.15)
-		fcSpeed = math.clamp(fcSpeed * factor, FC_MIN, FC_MAX)
-		setStatus("Freecam speed: " .. math.floor(fcSpeed + 0.5), C.muted)
+		-- scroll up = zoom in, scroll down = zoom out
+		local factor = input.Position.Z > 0 and (1 / 1.12) or 1.12
+		fcTarget = math.clamp(fcTarget * factor, 8, 110)
+		local zoom = math.tan(math.rad(fcOrigFov) / 2) / math.tan(math.rad(fcTarget) / 2)
+		setStatus(("Zoom %.1fx"):format(zoom), C.muted)
 	end
 end)
 end
@@ -2367,13 +2346,14 @@ local KB = {
 		{id = "espAll",     name = "ESP everyone",       default = false},
 		{id = "espNames",   name = "ESP names",          default = false},
 		{id = "antiAfk",    name = "Anti-AFK",           default = false},
+		{id = "invisible",  name = "Invisible",          default = false},
 	},
 }
 for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
 
 -- Per-player save file (needs an executor with writefile / readfile).
 -- SAVED: key binds, the Keybinds switch, every switch and setting on the ESP tab,
--- the Freecam and Anti-AFK switches, and the interface size.
+-- and the Freecam and Anti-AFK switches.
 -- NOT saved: Fullbright, Walk speed, Fly, Noclip, Click teleport.
 local SAVE_FILE = "KRHUB_settings_" .. player.UserId .. ".json"
 KB.http = game:GetService("HttpService")
@@ -2412,7 +2392,6 @@ function KB.snapshot()
 		esp = {all = espAll, names = espNames, box = box},
 		freecam = freecamOn,
 		antiAfk = antiAfkOn,
-		uiSize = math.round(uiMul * 100),
 	}
 end
 
@@ -2473,7 +2452,6 @@ do
 		end
 
 		if type(data.antiAfk) == "boolean" then KB.restore.antiAfk = data.antiAfk end
-		if type(data.uiSize) == "number" then uiMul = math.clamp(data.uiSize, 50, 250) / 100 end
 		KB.restore.freecam = data.freecam == true
 
 		local esp = data.esp
@@ -3079,6 +3057,110 @@ do
 	end
 end
 
+--------------------------------------------------------------------
+-- Invisible
+-- Every frame your real position is restored for your own screen, but the
+-- position sent to the server is 50 studs down and flipped, so other
+-- players don't see you. While it is on, anything that depends on your
+-- server position (touching things, damage, tools) won't work normally.
+--------------------------------------------------------------------
+local invisibleOn = false
+local setInvisible
+do
+	local RENDER_KEY = "KRHUBInvisible"
+	local DROP = 50
+	local realCF
+	local origTransparency, origCollide = {}, {}
+	local hbConn
+
+	local function stop()
+		pcall(function() RunService:UnbindFromRenderStep(RENDER_KEY) end)
+		if hbConn then hbConn:Disconnect() hbConn = nil end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if root and realCF then
+			root.CFrame = realCF
+			local v = root.AssemblyLinearVelocity
+			root.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+		end
+		realCF = nil
+		for part, t in pairs(origTransparency) do
+			if part.Parent then part.Transparency = t end
+		end
+		for part, c in pairs(origCollide) do
+			if part.Parent then part.CanCollide = c end
+		end
+		if root then root.Transparency = 1 end
+		table.clear(origTransparency)
+		table.clear(origCollide)
+	end
+
+	local function start()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return false end
+
+		if hbConn then hbConn:Disconnect() hbConn = nil end
+		realCF = nil
+		table.clear(origTransparency)
+		table.clear(origCollide)
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part ~= root then
+				origTransparency[part] = part.Transparency
+				origCollide[part] = part.CanCollide
+				part.Transparency = 0.5
+				part.CanCollide = false
+			end
+		end
+		root.Transparency = 1
+
+		pcall(function() RunService:UnbindFromRenderStep(RENDER_KEY) end)
+		RunService:BindToRenderStep(RENDER_KEY, Enum.RenderPriority.Camera.Value - 1, function()
+			if invisibleOn and realCF and root.Parent then root.CFrame = realCF end
+		end)
+
+		local isR15 = hum.RigType == Enum.HumanoidRigType.R15
+		hbConn = RunService.Heartbeat:Connect(function()
+			if not gui.Parent then          -- script was run again: undo everything
+				invisibleOn = false
+				stop()
+				return
+			end
+			if not invisibleOn or not root.Parent then return end
+			realCF = root.CFrame
+			root.CFrame = realCF * CFrame.new(0, -DROP, 0) * CFrame.Angles(math.rad(isR15 and 180 or 90), 0, 0)
+		end)
+		return true
+	end
+
+	player.CharacterAdded:Connect(function()
+		if invisibleOn then
+			task.wait(0.5)
+			if invisibleOn then start() end
+		end
+	end)
+
+	setInvisible = function(state)
+		state = state and true or false
+		if state == invisibleOn then return end
+		if state then
+			if not start() then
+				setStatus("Your character isn't loaded", C.err)
+				if updateUI then updateUI() end
+				return
+			end
+			invisibleOn = true
+			setStatus("Invisible on", C.ok)
+		else
+			invisibleOn = false
+			stop()
+			setStatus("Invisible off", C.muted)
+		end
+		if updateUI then updateUI() end
+	end
+end
+
 -- Page: Player (movement, world, actions) -----------------------------------
 ;(function()
 	local left  = makeColumn(allPage, "left")
@@ -3088,6 +3170,7 @@ end
 	local card = makeCard(left, "Movement")
 	UI.switchRow(card, "Fly", "fly", function(on) if on ~= flyOn then toggleFly() end end)
 	UI.switchRow(card, "Noclip", "noclip", setNoclip)
+	UI.switchRow(card, "Invisible", "invisible", function(on) setInvisible(on) end)
 	UI.switchRow(card, "Freecam", "freecam", function(on) if on ~= freecamOn then toggleFreecam() end end)
 	UI.switchRow(card, "Click teleport", "clickTp", setClickTp)
 	flySliderApi = UI.sliderRow(card, left, "Fly speed", 10, 300, flySpeed, "st/s", function(v) flySpeed = v end)
@@ -3329,6 +3412,7 @@ updateUI = function()
 	sw("noclip", noclipOn)
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
+	sw("invisible", invisibleOn)
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
 	sw("boxEsp", boxCfg.enabled)
@@ -3477,7 +3561,7 @@ local function setVisible(state)
 	visible = state
 	if state then
 		main.Visible = true
-		tween(mainScale, 0.45, {Scale = getUiScale()}, Enum.EasingStyle.Back)
+		tween(mainScale, 0.45, {Scale = 1}, Enum.EasingStyle.Back)
 		updateUI() -- re-sync every button with the real ESP / spectate state
 	else
 		local tw = tween(mainScale, 0.25, {Scale = 0}, Enum.EasingStyle.Back, Enum.EasingDirection.In)
@@ -3501,6 +3585,7 @@ KB.actions.fullbright = function() setFullbright(not fullbrightOn) end
 KB.actions.espAll     = function() setEspAll(not espAll) end
 KB.actions.espNames   = function() setEspNames(not espNames) end
 KB.actions.antiAfk    = function() setAntiAfk(not antiAfkOn) end
+KB.actions.invisible  = function() setInvisible(not invisibleOn) end
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed or capturingKey then return end
@@ -3679,13 +3764,6 @@ end
 	end)
 	addHint(card, "Opens the command bar anywhere. Click the key, then press a new one. Esc cancels.")
 
-	-- Interface size: automatic from your screen, plus this slider on top
-	local szCard = makeCard(left, "Interface size")
-	UI.sliderRow(szCard, left, "UI size", 50, 250, math.round(uiMul * 100), "%",
-		function(v) uiMul = v / 100 end,
-		function() applyUiScale() saveSettings() end)
-	addHint(szCard, "Starts automatic for your screen. Lower it if it's too big, raise it if text is too small.")
-
 	local scard = makeCard(left, "Saving")
 	local srow = Instance.new("Frame")
 	srow.BackgroundTransparency = 1
@@ -3714,13 +3792,13 @@ end
 		KB.flush(true)
 		setStatus("Save requested", C.muted)
 	end)
-	addHint(scard, "Keys, ESP settings, Freecam, Anti-AFK and the UI size are saved per account (needs file saving in your executor).")
+	addHint(scard, "Keys, ESP settings, Freecam and Anti-AFK are saved per account (needs file saving in your executor).")
 
 	local ref = makeCard(left, "Commands")
 	addHint(ref, table.concat({
 		"goto / spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
-		"freecam noclip fly clicktp antiafk fullbright",
+		"freecam noclip fly invisible clicktp antiafk fullbright",
 		"keybinds  (on|off)   speed / flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
@@ -3824,12 +3902,6 @@ end)()
 	root.Visible = false
 	root.ZIndex = 5
 	root.Parent = gui
-
-	-- the command bar grows with the screen too
-	local cmdScale = Instance.new("UIScale")
-	cmdScale.Scale = getUiScale()
-	cmdScale.Parent = root
-	table.insert(extraScales, cmdScale)
 
 	local bar = Instance.new("Frame")
 	bar.Name = "InputBar"
@@ -4074,6 +4146,7 @@ end)()
 	boolCommand("fly", "fly", function() return flyOn end,
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
+	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 	boolCommand("keybinds", "keybinds", function() return KB.on end,
@@ -4474,7 +4547,7 @@ makeDraggable(titleBar)
 		local y = main.AbsolutePosition.Y + main.AbsoluteSize.Y + 8
 		y = math.min(y, gui.AbsoluteSize.Y - 26) -- stay on screen
 		dock.Position = UDim2.fromOffset(x, y)
-		dock.Visible = main.Visible and mainScale.Scale > 0.6 * getUiScale()
+		dock.Visible = main.Visible and mainScale.Scale > 0.6
 	end
 	main:GetPropertyChangedSignal("AbsolutePosition"):Connect(follow)
 	main:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow)
@@ -4595,7 +4668,7 @@ task.spawn(function()
 	stroke(box, C.cardStroke, 1, 0)
 
 	local boxScale = Instance.new("UIScale")
-	boxScale.Scale = 0.92 * getUiScale()
+	boxScale.Scale = 0.92
 	boxScale.Parent = box
 
 	label(box, {
@@ -4648,7 +4721,7 @@ task.spawn(function()
 	end)
 
 	tween(box, 0.25, {GroupTransparency = 0})
-	tween(boxScale, 0.3, {Scale = getUiScale()})
+	tween(boxScale, 0.3, {Scale = 1})
 	task.wait(0.25)
 
 	local steps = {
@@ -4667,7 +4740,7 @@ task.spawn(function()
 
 	task.wait(0.15)
 	local out = tween(box, 0.25, {GroupTransparency = 1})
-	tween(boxScale, 0.25, {Scale = 0.94 * getUiScale()})
+	tween(boxScale, 0.25, {Scale = 0.94})
 	out.Completed:Wait()
 	box:Destroy()
 	progress:Destroy()
@@ -4676,6 +4749,6 @@ task.spawn(function()
 	visible = true
 	main.Visible = true
 	updateUI()
-	tween(mainScale, 0.5, {Scale = getUiScale()}, Enum.EasingStyle.Back)
+	tween(mainScale, 0.5, {Scale = 1}, Enum.EasingStyle.Back)
 	KB.start()
 end)
