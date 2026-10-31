@@ -6,7 +6,7 @@
 	  Teleport - type a name; the player card has TELEPORT / SPECTATE / ESP.
 	  Friends  - friends in your server, in other servers of this game, and in other
 	             games (JOIN follows them, retrying while the server is full).
-	  Player   - fly, noclip, freecam, click teleport, speeds, fullbright, Anti-AFK,
+	  Player   - fly, noclip, invisible, freecam, click teleport, speeds, fullbright, Anti-AFK,
 	             the REJOIN / UGC EMOTE / HELLO buttons, and the Voice chat card.
 	  ESP      - every ESP option: box, name, distance, health, line, colors.
 	  Settings - command bar key, per-feature keybinds, saving, command list.
@@ -2335,6 +2335,7 @@ local KB = {
 		{id = "espAll",     name = "ESP everyone",       default = false},
 		{id = "espNames",   name = "ESP names",          default = false},
 		{id = "antiAfk",    name = "Anti-AFK",           default = false},
+		{id = "invisible",  name = "Invisible",          default = false},
 	},
 }
 for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
@@ -3045,6 +3046,110 @@ do
 	end
 end
 
+--------------------------------------------------------------------
+-- Invisible
+-- Every frame your real position is restored for your own screen, but the
+-- position sent to the server is 50 studs down and flipped, so other
+-- players don't see you. While it is on, anything that depends on your
+-- server position (touching things, damage, tools) won't work normally.
+--------------------------------------------------------------------
+local invisibleOn = false
+local setInvisible
+do
+	local RENDER_KEY = "KRHUBInvisible"
+	local DROP = 50
+	local realCF
+	local origTransparency, origCollide = {}, {}
+	local hbConn
+
+	local function stop()
+		pcall(function() RunService:UnbindFromRenderStep(RENDER_KEY) end)
+		if hbConn then hbConn:Disconnect() hbConn = nil end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if root and realCF then
+			root.CFrame = realCF
+			local v = root.AssemblyLinearVelocity
+			root.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+		end
+		realCF = nil
+		for part, t in pairs(origTransparency) do
+			if part.Parent then part.Transparency = t end
+		end
+		for part, c in pairs(origCollide) do
+			if part.Parent then part.CanCollide = c end
+		end
+		if root then root.Transparency = 1 end
+		table.clear(origTransparency)
+		table.clear(origCollide)
+	end
+
+	local function start()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return false end
+
+		if hbConn then hbConn:Disconnect() hbConn = nil end
+		realCF = nil
+		table.clear(origTransparency)
+		table.clear(origCollide)
+		for _, part in ipairs(char:GetDescendants()) do
+			if part:IsA("BasePart") and part ~= root then
+				origTransparency[part] = part.Transparency
+				origCollide[part] = part.CanCollide
+				part.Transparency = 0.5
+				part.CanCollide = false
+			end
+		end
+		root.Transparency = 1
+
+		pcall(function() RunService:UnbindFromRenderStep(RENDER_KEY) end)
+		RunService:BindToRenderStep(RENDER_KEY, Enum.RenderPriority.Camera.Value - 1, function()
+			if invisibleOn and realCF and root.Parent then root.CFrame = realCF end
+		end)
+
+		local isR15 = hum.RigType == Enum.HumanoidRigType.R15
+		hbConn = RunService.Heartbeat:Connect(function()
+			if not gui.Parent then          -- script was run again: undo everything
+				invisibleOn = false
+				stop()
+				return
+			end
+			if not invisibleOn or not root.Parent then return end
+			realCF = root.CFrame
+			root.CFrame = realCF * CFrame.new(0, -DROP, 0) * CFrame.Angles(math.rad(isR15 and 180 or 90), 0, 0)
+		end)
+		return true
+	end
+
+	player.CharacterAdded:Connect(function()
+		if invisibleOn then
+			task.wait(0.5)
+			if invisibleOn then start() end
+		end
+	end)
+
+	setInvisible = function(state)
+		state = state and true or false
+		if state == invisibleOn then return end
+		if state then
+			if not start() then
+				setStatus("Your character isn't loaded", C.err)
+				if updateUI then updateUI() end
+				return
+			end
+			invisibleOn = true
+			setStatus("Invisible on", C.ok)
+		else
+			invisibleOn = false
+			stop()
+			setStatus("Invisible off", C.muted)
+		end
+		if updateUI then updateUI() end
+	end
+end
+
 -- Page: Player (movement, world, actions) -----------------------------------
 ;(function()
 	local left  = makeColumn(allPage, "left")
@@ -3054,6 +3159,7 @@ end
 	local card = makeCard(left, "Movement")
 	UI.switchRow(card, "Fly", "fly", function(on) if on ~= flyOn then toggleFly() end end)
 	UI.switchRow(card, "Noclip", "noclip", setNoclip)
+	UI.switchRow(card, "Invisible", "invisible", function(on) setInvisible(on) end)
 	UI.switchRow(card, "Freecam", "freecam", function(on) if on ~= freecamOn then toggleFreecam() end end)
 	UI.switchRow(card, "Click teleport", "clickTp", setClickTp)
 	flySliderApi = UI.sliderRow(card, left, "Fly speed", 10, 300, flySpeed, "st/s", function(v) flySpeed = v end)
@@ -3295,6 +3401,7 @@ updateUI = function()
 	sw("noclip", noclipOn)
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
+	sw("invisible", invisibleOn)
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
 	sw("boxEsp", boxCfg.enabled)
@@ -3467,6 +3574,7 @@ KB.actions.fullbright = function() setFullbright(not fullbrightOn) end
 KB.actions.espAll     = function() setEspAll(not espAll) end
 KB.actions.espNames   = function() setEspNames(not espNames) end
 KB.actions.antiAfk    = function() setAntiAfk(not antiAfkOn) end
+KB.actions.invisible  = function() setInvisible(not invisibleOn) end
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed or capturingKey then return end
@@ -3679,7 +3787,7 @@ end
 	addHint(ref, table.concat({
 		"goto / spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
-		"freecam noclip fly clicktp antiafk fullbright",
+		"freecam noclip fly invisible clicktp antiafk fullbright",
 		"keybinds  (on|off)   speed / flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
@@ -4027,6 +4135,7 @@ end)()
 	boolCommand("fly", "fly", function() return flyOn end,
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
+	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 	boolCommand("keybinds", "keybinds", function() return KB.on end,
