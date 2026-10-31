@@ -4,7 +4,8 @@
 
 	Tabs:
 	  Teleport - type a name; the player card has TELEPORT / SPECTATE / ESP.
-	  Friends  - friends in your server, in other servers of this game, and in other
+	  Friends  - friends in your server (optional avatar circles above their heads: click
+	             one to teleport), in other servers of this game, and in other
 	             games (JOIN follows them, retrying while the server is full).
 	  Player   - fly, noclip, invisible, freecam, click teleport, speeds, fullbright, Anti-AFK,
 	             the REJOIN / UGC EMOTE / HELLO buttons, and the Voice chat card.
@@ -2321,6 +2322,7 @@ local sameList, sameEmpty, sameHeader
 local otherList, otherEmpty, otherHeader
 local sameRefreshBtn, updatedLabel
 local rebuildOnlineLists          -- defined after the GUI (needs join logic)
+local bubblesOn, setBubbles       -- friend avatars above their heads (Friends tab switch)
 local fetchOnlineFriends          -- same
 local ready = false   -- becomes true when the loading bar is done
 local doRejoin, doEmote                 -- filled in by the Player tab
@@ -2597,6 +2599,28 @@ do
 	leftCard, friendsHeader, friendList, emptyLabel = makeListCard(
 		friendsPage, UDim2.fromOffset(0, 0), UDim2.new(0.5, -7, 1, 0), "Friends in this server")
 	emptyLabel.Text = "No friends in this server"
+	emptyLabel.Position = UDim2.fromOffset(0, 100)
+
+	-- switch: show each friend's avatar above their head (click it to teleport)
+	friendList.Position = UDim2.fromOffset(12, 82)
+	friendList.Size = UDim2.new(1, -24, 1, -90)
+	local trow = Instance.new("Frame")
+	trow.BackgroundTransparency = 1
+	trow.Position = UDim2.fromOffset(12, 48)
+	trow.Size = UDim2.new(1, -24, 0, 28)
+	trow.Parent = leftCard
+	label(trow, {
+		Text = "Avatars above heads",
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, -84, 1, 0),
+	})
+	local bseg = makeSegmented(trow, {"OFF", "ON"}, UDim2.fromOffset(76, 24), {C.red, C.mint})
+	bseg.frame.AnchorPoint = Vector2.new(1, 0.5)
+	bseg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+	bseg.onSelect = function(idx) setBubbles(idx == 2) end
+	switches.friendBubbles = bseg
 
 	local rightHolder = Instance.new("Frame")
 	rightHolder.BackgroundTransparency = 1
@@ -3413,6 +3437,7 @@ updateUI = function()
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
 	sw("invisible", invisibleOn)
+	sw("friendBubbles", bubblesOn)
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
 	sw("boxEsp", boxCfg.enabled)
@@ -3457,6 +3482,92 @@ updateUI = function()
 	bannerSummary.Visible = summary ~= ""
 end
 
+-- Friend bubbles: every friend in your server gets their avatar in a small circle
+-- above their head. It follows them wherever they go; click it to teleport to them.
+do
+	local bubbles = {}   -- [UserId] = BillboardGui
+
+	local function remove(userId)
+		local b = bubbles[userId]
+		if b then b:Destroy() bubbles[userId] = nil end
+	end
+
+	local function make(p, head)
+		local b = Instance.new("BillboardGui")
+		b.Name = "KRHUBFriendBubble"
+		b.Adornee = head
+		b.AlwaysOnTop = true
+		b.Active = true
+		b.ResetOnSpawn = false
+		b.LightInfluence = 0
+		b.MaxDistance = 1500
+		b.Size = UDim2.fromOffset(44, 44)
+		b.StudsOffset = Vector3.new(0, 2.6, 0)
+		b.SizeOffset = Vector2.new(0, 0.82)    -- sits above the head, and above an ESP name tag
+
+		local btn = Instance.new("ImageButton")
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.BackgroundColor3 = C.card
+		btn.BorderSizePixel = 0
+		btn.AutoButtonColor = false
+		btn.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150"):format(p.UserId)
+		btn.Parent = b
+		corner(btn, 22)
+		local ring = stroke(btn, C.mint, 2, 0)
+
+		btn.MouseEnter:Connect(function() tween(ring, 0.12, {Thickness = 3}) end)
+		btn.MouseLeave:Connect(function() tween(ring, 0.12, {Thickness = 2}) end)
+		btn.MouseButton1Click:Connect(function() teleportTo(p) end)
+
+		b.Parent = playerGui
+		bubbles[p.UserId] = b
+	end
+
+	local function refresh()
+		if not gui.Parent or not bubblesOn then
+			for id in pairs(bubbles) do remove(id) end
+			return
+		end
+		local wanted = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player and p.Parent and friendCache[p.UserId] then
+				local char = p.Character
+				local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
+				if head then
+					wanted[p.UserId] = true
+					local b = bubbles[p.UserId]
+					if b and b.Adornee ~= head then remove(p.UserId) b = nil end
+					if not b then make(p, head) end
+				end
+			end
+		end
+		for id in pairs(bubbles) do
+			if not wanted[id] then remove(id) end
+		end
+	end
+	KB.refreshBubbles = refresh
+
+	bubblesOn = false
+	setBubbles = function(state)
+		state = state and true or false
+		if state == bubblesOn then return end
+		bubblesOn = state
+		refresh()
+		setStatus(state and "Friend avatars on" or "Friend avatars off", state and C.ok or C.muted)
+		if updateUI then updateUI() end
+	end
+
+	-- keep them in step: respawns, new heads, friends joining and leaving
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(1)
+			if bubblesOn then refresh() end
+		end
+		refresh()   -- the window was removed: take the circles with it
+	end)
+	Players.PlayerRemoving:Connect(function(p) remove(p.UserId) end)
+end
+
 refreshFriends = function()
 	for _, child in ipairs(friendList:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
@@ -3475,6 +3586,7 @@ refreshFriends = function()
 	emptyLabel.Visible = (count == 0)
 	friendsHeader.Text = ("Friends in this server (%d)"):format(count)
 	updateUI()
+	if KB.refreshBubbles then KB.refreshBubbles() end
 end
 
 Players.PlayerAdded:Connect(checkFriend)
@@ -3799,7 +3911,7 @@ end
 		"goto / spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
 		"freecam noclip fly invisible clicktp antiafk fullbright",
-		"keybinds  (on|off)   speed / flyspeed <number>",
+		"keybinds  bubbles  (on|off)   speed / flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -4147,6 +4259,7 @@ end)()
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
+	boolCommand("bubbles", "bubbles", function() return bubblesOn end, setBubbles, "Friend avatars")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 	boolCommand("keybinds", "keybinds", function() return KB.on end,
