@@ -6,8 +6,8 @@
 	  Teleport - type a username / display name. A player card pops out with
 	             TELEPORT, SPECTATE and ESP buttons for that person.
 	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
-	  Misc     - ESP everyone, name tags, freecam, Anti-AFK, walk speed,
-	             fullbright (also removes fog, shadows, effects).
+	  Misc     - freecam, Anti-AFK, rejoin, walk speed, fullbright
+	             (also removes fog, shadows, effects).
 	  ESP      - every ESP option: box, one name tag, distance, health, line to player, colors.
 	  Tools    - noclip, fly (+ speed), click teleport.
 	  VC       - voice chat button.
@@ -2291,23 +2291,113 @@ local KB = {
 }
 for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
 
+-- Per-player save file (needs an executor with writefile / readfile).
+-- SAVED: key binds, the Keybinds switch, every switch and setting on the ESP tab,
+-- and the Freecam and Anti-AFK switches.
+-- NOT saved: Fullbright, Walk speed and everything on the Tools tab.
+local SAVE_FILE = "KRHUB_settings_" .. player.UserId .. ".json"
+KB.http = game:GetService("HttpService")
+KB.restore = {}        -- switches to turn back on once the window is ready
+KB.started = false
+KB.lastJson = ""
+
+function KB.canSave()
+	return typeof(isfile) == "function" and typeof(readfile) == "function" and typeof(writefile) == "function"
+end
+
+-- what gets written to the file (colors become {r, g, b} numbers)
+function KB.snapshot()
+	local binds = {}
+	for _, def in ipairs(KB.defs) do
+		local c = KB.binds[def.id]
+		binds[def.id] = c and c.Name or false
+	end
+	local box = {}
+	for k, v in pairs(boxCfg) do
+		if typeof(v) == "Color3" then
+			box[k] = {math.round(v.R * 255), math.round(v.G * 255), math.round(v.B * 255)}
+		else
+			box[k] = v
+		end
+	end
+	return {
+		v = 1,
+		commandKey = cmdKey.Name,
+		keybindsOn = KB.on,
+		binds = binds,
+		esp = {all = espAll, names = espNames, box = box},
+		freecam = freecamOn,
+		antiAfk = antiAfkOn,
+	}
+end
+
+-- writes the file when something changed (or always when force = true)
+function KB.flush(force)
+	if not KB.started or not KB.canSave() then return end
+	local ok, json = pcall(function() return KB.http:JSONEncode(KB.snapshot()) end)
+	if ok and (force or json ~= KB.lastJson) then
+		if pcall(writefile, SAVE_FILE, json) then KB.lastJson = json end
+	end
+end
+
+-- read the file now, before the pages are built, so every switch starts right
 do
 	pcall(function()
-		if isfile and readfile and isfile(SETTINGS_FILE) then
-			local data = game:GetService("HttpService"):JSONDecode(readfile(SETTINGS_FILE))
-			local function code(name)
-				local ok, c = pcall(function() return Enum.KeyCode[name] end)
-				return ok and c or nil
+		if not KB.canSave() then return end
+		-- falls back to the old shared file once, so your keys carry over
+		local path = (isfile(SAVE_FILE) and SAVE_FILE) or (isfile(SETTINGS_FILE) and SETTINGS_FILE)
+		if not path then return end
+		local data = KB.http:JSONDecode(readfile(path))
+		if type(data) ~= "table" then return end
+
+		local function code(name)
+			local ok, c = pcall(function() return Enum.KeyCode[name] end)
+			return ok and c or nil
+		end
+		if type(data.commandKey) == "string" and code(data.commandKey) then cmdKey = code(data.commandKey) end
+		if type(data.keybindsOn) == "boolean" then KB.on = data.keybindsOn end
+		if type(data.binds) == "table" then
+			for _, def in ipairs(KB.defs) do
+				local v = data.binds[def.id]
+				if v == false then
+					KB.binds[def.id] = false
+				elseif type(v) == "string" and code(v) then
+					KB.binds[def.id] = code(v)
+				end
 			end
-			if data.commandKey and code(data.commandKey) then cmdKey = code(data.commandKey) end
-			if data.keybindsOn ~= nil then KB.on = data.keybindsOn and true or false end
-			if type(data.binds) == "table" then
-				for _, def in ipairs(KB.defs) do
-					local v = data.binds[def.id]
-					if v == false then
-						KB.binds[def.id] = false
-					elseif type(v) == "string" and code(v) then
-						KB.binds[def.id] = code(v)
+		end
+
+		if type(data.antiAfk) == "boolean" then KB.restore.antiAfk = data.antiAfk end
+		KB.restore.freecam = data.freecam == true
+
+		local esp = data.esp
+		if type(esp) == "table" then
+			if type(esp.names) == "boolean" then espNames = esp.names end
+			KB.restore.espAll = esp.all == true
+
+			local s = esp.box
+			if type(s) == "table" then
+				for _, k in ipairs({"enabled", "outline", "displayName", "distance", "meters", "health",
+					"tracers", "textSame", "teamCheck", "teamColor", "rainbow", "chams"}) do
+					if type(s[k]) == "boolean" then boxCfg[k] = s[k] end
+				end
+				local function num(k, lo, hi)
+					if type(s[k]) == "number" then boxCfg[k] = math.clamp(math.round(s[k]), lo, hi) end
+				end
+				num("thickness", 1, 6)
+				num("fill", 0, 100)
+				num("tracerThickness", 1, 6)
+				num("textSize", 8, 24)
+				num("maxDist", 50, 5000)
+				if s.style == "Box" or s.style == "Corners" then boxCfg.style = s.style end
+				if s.tracerFrom == "Player" or s.tracerFrom == "Bottom" or s.tracerFrom == "Center" then
+					boxCfg.tracerFrom = s.tracerFrom
+				end
+				for _, k in ipairs({"color", "textColor"}) do
+					local c = s[k]
+					if type(c) == "table" and type(c[1]) == "number" and type(c[2]) == "number" and type(c[3]) == "number" then
+						boxCfg[k] = Color3.fromRGB(
+							math.clamp(c[1], 0, 255), math.clamp(c[2], 0, 255), math.clamp(c[3], 0, 255))
 					end
 				end
 			end
@@ -2315,21 +2405,26 @@ do
 	end)
 end
 
-local function saveSettings()
-	pcall(function()
-		if writefile then
-			local out = {}
-			for _, def in ipairs(KB.defs) do
-				local c = KB.binds[def.id]
-				out[def.id] = c and c.Name or false
-			end
-			writefile(SETTINGS_FILE, game:GetService("HttpService"):JSONEncode({
-				commandKey = cmdKey.Name,
-				keybindsOn = KB.on,
-				binds = out,
-			}))
+-- called once when the window is ready: turn the saved switches back on,
+-- then start saving automatically (checks once a second, writes only on change)
+function KB.start()
+	local r = KB.restore
+	if r.espAll then setEspAll(true) end
+	if r.antiAfk ~= nil and r.antiAfk ~= antiAfkOn then setAntiAfk(r.antiAfk) end
+	if r.freecam then startFreecam() end
+
+	KB.started = true
+	KB.flush(true)
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(1)
+			KB.flush(false)
 		end
 	end)
+end
+
+local function saveSettings()
+	KB.flush(true)
 end
 local capturingKey = false              -- true while the Settings tab waits for a key
 local visible = true  -- GUI shown? (also used by the friend auto-refresh)
@@ -2880,42 +2975,6 @@ do
 	local left  = makeColumn(allPage, "left")
 	local right = makeColumn(allPage, "right")
 
-	-- ESP everyone
-	do
-		local card, head = makeCard(left, "ESP everyone")
-		addSwitch(head, "espAll", function(on)
-			if on ~= espAll then setEspAll(on) end
-		end)
-		addHint(card, "ESP on every player in the server (box, name, distance, health, line). All options are in the ESP tab.")
-	end
-
-	-- ESP names
-	do
-		local card, head = makeCard(left, "ESP names")
-		addSwitch(head, "espNames", function(on)
-			if on ~= espNames then setEspNames(on) end
-		end)
-		addHint(card, "Name tags above ESP'd players.")
-	end
-
-	-- ESP status + clear
-	do
-		local card = makeCard(left, "ESP status")
-		allInfo = label(card, {
-			Text = "ESP active on 0 players",
-			Font = Enum.Font.GothamMedium,
-			TextSize = 13,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Size = UDim2.new(1, 0, 0, 20),
-			LayoutOrder = nextOrder(card),
-		})
-		addHint(card, "ESP keeps running when you close this window.")
-		local clearBtn = makeButton(card, "CLEAR ALL ESP", "ghost", 12)
-		clearBtn.Size = UDim2.new(1, 0, 0, 34)
-		clearBtn.LayoutOrder = nextOrder(card)
-		clearBtn.MouseButton1Click:Connect(clearAllEsp)
-	end
-
 	-- Fullbright (one switch)
 	do
 		local card, head = makeCard(left, "Fullbright")
@@ -3227,6 +3286,14 @@ end
 			if on ~= espAll then setEspAll(on) end
 		end)
 		addHint(card, "Turns ESP on for every player. For single players use the Teleport / Friends tabs or the esp <player> command.")
+		allInfo = label(card, {
+			Text = "ESP active on 0 players",
+			Font = Enum.Font.GothamMedium,
+			TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Size = UDim2.new(1, 0, 0, 20),
+			LayoutOrder = nextOrder(card),
+		})
 		switchRow(card, "Names (one tag above the box)", "espNames_tab", function(on)
 			if on ~= espNames then setEspNames(on) end
 		end)
@@ -3721,7 +3788,7 @@ end
 		setStatus("Command bar key: ;", C.muted)
 	end)
 
-	addHint(card, "Your keys are remembered between runs when your executor supports saving files.")
+	addHint(card, "Your keys, the ESP tab and the Freecam / Anti-AFK switches are saved for each Roblox account (needs an executor with file saving). Fullbright, walk speed and the Tools tab are not saved.")
 
 	local ref = makeCard(left, "Commands")
 	addHint(ref, table.concat({
@@ -4684,4 +4751,5 @@ task.spawn(function()
 	main.Visible = true
 	updateUI()
 	tween(mainScale, 0.5, {Scale = 1}, Enum.EasingStyle.Back)
+	KB.start()
 end)
