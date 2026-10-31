@@ -2,26 +2,17 @@
 	KRHUB Teleport GUI  (LocalScript)
 	Style reference: BlurAutoClicker (dark cards, green #06402B accent, OFF/ON switches)
 
-	Tabs (top left):
-	  Teleport - type a username / display name. A player card pops out with
-	             TELEPORT, SPECTATE and ESP buttons for that person.
-	  Friends  - your Roblox friends in the same server (TP / SPECTATE / ESP).
-	  Misc     - freecam, Anti-AFK, rejoin, walk speed, fullbright
-	             (also removes fog, shadows, effects).
-	  ESP      - every ESP option: box, one name tag, distance, health, line to player, colors.
-	  Tools    - noclip, fly (+ speed), click teleport.
-	  VC       - voice chat button.
-	  Settings - turn keybinds on / off and change every key.
+	Tabs:
+	  Teleport - type a name; the player card has TELEPORT / SPECTATE / ESP.
+	  Friends  - friends in your server, in other servers of this game, and in other
+	             games (JOIN follows them, retrying while the server is full).
+	  Player   - fly, noclip, freecam, click teleport, speeds, fullbright, Anti-AFK,
+	             the REJOIN / UGC EMOTE / HELLO buttons, and the Voice chat card.
+	  ESP      - every ESP option: box, name, distance, health, line, colors.
+	  Settings - command bar key, per-feature keybinds, saving, command list.
 
 	Command bar: press ; (rebindable) and type goto <name>, esp on, fly, ...
-
-	Controls:
-	  - Enter in the box teleports to the matched player
-	  - Drag the title bar to move
-	  - "-" minimizes, "x" hides it
-	  - Keys are rebindable in Settings (defaults: K window, P freecam, F fly, N noclip)
-	  - Freecam: WASD, E/Q, hold right mouse to look
-	  - Slider value boxes are editable: type a number and press Enter
+	Drag the title bar or the bar under the panel to move; the corner grip resizes.
 ]]
 
 local Players          = game:GetService("Players")
@@ -59,7 +50,7 @@ local C = {
 	err        = Color3.fromRGB(235, 120, 110),
 }
 
-local FULL_SIZE = UDim2.fromOffset(720, 440)
+local FULL_SIZE = UDim2.fromOffset(720, 480)
 local fullSize  = FULL_SIZE   -- current (resizable) size of the panel
 
 --------------------------------------------------------------------
@@ -103,9 +94,7 @@ local function label(parent, props)
 	return l
 end
 
--- Next LayoutOrder inside a container (keeps list order = creation order).
--- FIX: a nil container used to crash here ("attempt to index nil with
--- 'GetAttribute'"); it now just returns 0.
+-- Next LayoutOrder inside a container (keeps list order = creation order)
 local function nextOrder(container)
 	if not container then return 0 end
 	local n = (container:GetAttribute("n") or 0) + 1
@@ -392,10 +381,8 @@ local closeBtn = titleButton("×", -38)
 local TAB_DEFS = {
 	{key = "Normal",   text = "Teleport", width = 62},
 	{key = "Friends",  text = "Friends",  width = 54},
-	{key = "All",      text = "Misc",     width = 42},
+	{key = "All",      text = "Player",   width = 48},
 	{key = "ESP",      text = "ESP",      width = 38},
-	{key = "Tools",    text = "Tools",    width = 46},
-	{key = "VC",       text = "VC",       width = 34},
 	{key = "Settings", text = "Settings", width = 58},
 }
 local TAB_BUTTONS = {}
@@ -593,7 +580,7 @@ local switches = {}            -- [key] = OFF/ON segmented control
 local rowSpecButtons = {}      -- [UserId] = spectate button on friend rows
 local rowEspButtons  = {}      -- [UserId] = ESP button on friend rows
 local cardSpecBtn, cardEspBtn  -- buttons on the player card
-local allInfo                  -- "ESP active on N players" label on Misc
+local allInfo                  -- "ESP active on N players" label on the ESP tab
 local stopFreecam              -- defined in the freecam section
 local currentMatch             -- player currently shown on the card
 local inputBox                 -- username box on the Teleport tab
@@ -727,7 +714,7 @@ local function toggleEsp(p)
 		return
 	end
 	if espAll then
-		setStatus("ESP everyone is on (Misc tab)", C.muted)
+		setStatus("ESP everyone is on (ESP tab)", C.muted)
 		return
 	end
 	if espOn[p.UserId] then
@@ -1138,101 +1125,63 @@ end
 local antiAfkOn = false
 local setAntiAfk
 do
-local VirtualUser = game:GetService("VirtualUser")
+	local VirtualUser = game:GetService("VirtualUser")
+	local conn, paused = nil, {}   -- our Idled hook, and other Idled hooks we switched off
 
-local antiAfkConn   = nil
-local antiAfkStored = {}   -- other Idled connections we paused
-local antiAfkMode   = nil  -- "VirtualUser" or "VIM"
-local antiAfkVIM    = nil
-
-local function disableAntiAfk()
-	if antiAfkConn then
-		pcall(function() antiAfkConn:Disconnect() end)
-		antiAfkConn = nil
+	local function disable()
+		if conn then pcall(function() conn:Disconnect() end) conn = nil end
+		for _, c in ipairs(paused) do pcall(function() c:Enable() end) end
+		table.clear(paused)
 	end
 
-	for _, item in ipairs(antiAfkStored) do
-		if item.conn and item.enabled then
-			pcall(function() item.conn:Enable() end)
-		end
-	end
-
-	table.clear(antiAfkStored)
-	antiAfkMode = nil
-	antiAfkVIM = nil
-end
-
-local function enableAntiAfk()
-	if antiAfkConn then return true end
-
-	if typeof(getconnections) == "function" then
-		local ok, conns = pcall(getconnections, player.Idled)
-		if ok and type(conns) == "table" then
-			for _, c in ipairs(conns) do
-				if c.Enabled ~= false then
-					local paused = pcall(function() c:Disable() end)
-					if paused then
-						table.insert(antiAfkStored, {conn = c, enabled = true})
-					end
+	local function enable()
+		if conn then return true end
+		if typeof(getconnections) == "function" then
+			local ok, list = pcall(getconnections, player.Idled)
+			if ok and type(list) == "table" then
+				for _, c in ipairs(list) do
+					if c.Enabled ~= false and pcall(function() c:Disable() end) then table.insert(paused, c) end
 				end
 			end
 		end
-	end
-
-	local okVU = pcall(function() VirtualUser:CaptureController() end)
-	if okVU then
-		antiAfkMode = "VirtualUser"
-	else
-		local okVIM, vim = pcall(function()
-			return game:GetService("VirtualInputManager")
+		local mode, vim
+		if pcall(function() VirtualUser:CaptureController() end) then
+			mode = "VirtualUser"
+		else
+			local ok, svc = pcall(function() return game:GetService("VirtualInputManager") end)
+			if not (ok and svc) then disable() return false end
+			mode, vim = "VIM", svc
+		end
+		conn = player.Idled:Connect(function()
+			pcall(function()
+				if mode == "VirtualUser" then
+					local cam = workspace.CurrentCamera
+					local cf = cam and cam.CFrame or CFrame.new()
+					VirtualUser:CaptureController()
+					VirtualUser:Button2Down(Vector2.zero, cf)
+					task.wait(1)
+					VirtualUser:Button2Up(Vector2.zero, cf)
+				else
+					vim:SendMouseButtonEvent(0, 0, 1, true, game, 0)
+					task.wait(0.1)
+					vim:SendMouseButtonEvent(0, 0, 1, false, game, 0)
+				end
+			end)
 		end)
-		if okVIM and vim then
-			antiAfkMode = "VIM"
-			antiAfkVIM = vim
-		else
-			disableAntiAfk()
-			return false
-		end
+		return true
 	end
 
-	antiAfkConn = player.Idled:Connect(function()
-		if antiAfkMode == "VirtualUser" then
-			pcall(function()
-				local cam = workspace.CurrentCamera
-				local cf = cam and cam.CFrame or CFrame.new()
-				VirtualUser:CaptureController()
-				VirtualUser:Button2Down(Vector2.zero, cf)
-				task.wait(1)
-				VirtualUser:Button2Up(Vector2.zero, cf)
-			end)
-		elseif antiAfkMode == "VIM" and antiAfkVIM then
-			pcall(function()
-				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, true, game, 0)
-				task.wait(0.1)
-				antiAfkVIM:SendMouseButtonEvent(0, 0, 1, false, game, 0)
-			end)
-		end
-	end)
-
-	return true
-end
-
-setAntiAfk = function(state)
-	if state then
-		if enableAntiAfk() then
-			antiAfkOn = true
-			setStatus("Anti-AFK on", C.ok)
+	setAntiAfk = function(state)
+		if state then
+			antiAfkOn = enable()
+			setStatus(antiAfkOn and "Anti-AFK on" or "Anti-AFK unavailable here", antiAfkOn and C.ok or C.err)
 		else
+			disable()
 			antiAfkOn = false
-			setStatus("Anti-AFK unavailable here", C.err)
+			setStatus("Anti-AFK off", C.muted)
 		end
-	else
-		disableAntiAfk()
-		antiAfkOn = false
-		setStatus("Anti-AFK off", C.muted)
+		if updateUI then updateUI() end
 	end
-	if updateUI then updateUI() end
-end
 end
 
 --------------------------------------------------------------------
@@ -1811,7 +1760,7 @@ local function makeColumn(page, side)
 	col.Parent = page
 
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 10)
+	layout.Padding = UDim.new(0, 8)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = col
 	return col
@@ -1851,21 +1800,21 @@ local function makeCard(parent, title)
 	stroke(card, C.cardStroke, 1, 0)
 
 	local pad = Instance.new("UIPadding")
-	pad.PaddingTop = UDim.new(0, 12)
-	pad.PaddingBottom = UDim.new(0, 12)
-	pad.PaddingLeft = UDim.new(0, 12)
-	pad.PaddingRight = UDim.new(0, 12)
+	pad.PaddingTop = UDim.new(0, 8)
+	pad.PaddingBottom = UDim.new(0, 8)
+	pad.PaddingLeft = UDim.new(0, 10)
+	pad.PaddingRight = UDim.new(0, 10)
 	pad.Parent = card
 
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 8)
+	layout.Padding = UDim.new(0, 5)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = card
 
 	local head = Instance.new("Frame")
 	head.Name = "Head"
 	head.BackgroundTransparency = 1
-	head.Size = UDim2.new(1, 0, 0, 26)
+	head.Size = UDim2.new(1, 0, 0, 22)
 	head.LayoutOrder = -2
 	head.Parent = card
 
@@ -1921,12 +1870,14 @@ local function addSwitch(head, key, onChange)
 end
 
 -- Boxed, editable value (like the "45 %" box in the reference)
-local function makeValueBox(parent, text, unit)
+local function makeValueBox(parent, text, unit, w, h)
+	w, h = w or 78, h or 26
+	local padR = w > 70 and 26 or 22
 	local box = Instance.new("TextBox")
 	box.Name = "ValueBox"
 	box.AnchorPoint = Vector2.new(1, 0.5)
 	box.Position = UDim2.new(1, 0, 0.5, 0)
-	box.Size = UDim2.fromOffset(78, 26)
+	box.Size = UDim2.fromOffset(w, h)
 	box.BackgroundColor3 = C.field
 	box.BorderSizePixel = 0
 	box.Text = text
@@ -1940,7 +1891,7 @@ local function makeValueBox(parent, text, unit)
 	local bs = stroke(box, C.cardStroke, 1, 0)
 
 	local pad = Instance.new("UIPadding")
-	pad.PaddingRight = UDim.new(0, 26)
+	pad.PaddingRight = UDim.new(0, padR)
 	pad.Parent = box
 
 	label(box, {
@@ -1948,8 +1899,8 @@ local function makeValueBox(parent, text, unit)
 		Font = Enum.Font.GothamBold,
 		TextSize = 10,
 		TextColor3 = C.muted,
-		Position = UDim2.new(1, -28, 0, 0),
-		Size = UDim2.fromOffset(24, 26),
+		Position = UDim2.new(1, -(padR + 2), 0, 0),
+		Size = UDim2.fromOffset(24, h),
 	})
 
 	box.Focused:Connect(function() tween(bs, 0.2, {Color = C.mint}) end)
@@ -1958,7 +1909,8 @@ local function makeValueBox(parent, text, unit)
 end
 
 -- Slider (gold fill). valueLabel may be a TextLabel or an editable TextBox.
-local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onChange, onDone)
+local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onChange, onDone, o)
+	o = o or {}
 	local api = {}
 	local cur = startV
 
@@ -1966,7 +1918,8 @@ local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onCh
 	hit.Text = ""
 	hit.AutoButtonColor = false
 	hit.BackgroundTransparency = 1
-	hit.Size = UDim2.new(1, 0, 0, 26)
+	hit.Position = UDim2.fromOffset(o.left or 0, 0)
+	hit.Size = UDim2.new(1, -((o.left or 0) + (o.right or 0)), 0, o.h or 24)
 	hit.LayoutOrder = nextOrder(parent)
 	hit.Parent = parent
 
@@ -2057,6 +2010,103 @@ local function makeSlider(parent, scroller, minV, maxV, startV, valueLabel, onCh
 	return api
 end
 
+-- Compact rows shared by the Player, ESP and Settings pages
+local UI = {}
+
+-- label on the left, OFF / ON switch on the right
+function UI.switchRow(card, text, key, onChange)
+	local row = Instance.new("Frame")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 26)
+	row.LayoutOrder = nextOrder(card)
+	row.Parent = card
+	label(row, {
+		Text = text,
+		Font = Enum.Font.GothamMedium,
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Size = UDim2.new(1, -84, 1, 0),
+	})
+	local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(76, 24), {C.red, C.mint})
+	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
+	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+	seg.onSelect = function(idx)
+		onChange(idx == 2)
+		if updateUI then updateUI() end
+	end
+	if key then switches[key] = seg end
+	return seg
+end
+
+-- label, slider and editable value box on ONE line
+function UI.sliderRow(card, col, text, minV, maxV, startV, unit, onChange, onDone)
+	local r = Instance.new("Frame")
+	r.BackgroundTransparency = 1
+	r.Size = UDim2.new(1, 0, 0, 24)
+	r.LayoutOrder = nextOrder(card)
+	r.Parent = card
+	label(r, {
+		Text = text,
+		Font = Enum.Font.Gotham,
+		TextSize = 11,
+		TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Size = UDim2.new(0, 84, 1, 0),
+	})
+	local box = makeValueBox(r, tostring(startV), unit, 62, 22)
+	return makeSlider(r, col, minV, maxV, startV, box, onChange, onDone, {left = 88, right = 68, h = 24})
+end
+
+-- grid of equal cells (buttons / chips) inside a card
+function UI.grid(card, cellH, cols)
+	cols = cols or 2
+	local grid = Instance.new("Frame")
+	grid.BackgroundTransparency = 1
+	grid.Size = UDim2.new(1, 0, 0, 0)
+	grid.AutomaticSize = Enum.AutomaticSize.Y
+	grid.LayoutOrder = nextOrder(card)
+	grid.Parent = card
+	local lay = Instance.new("UIGridLayout")
+	lay.CellSize = UDim2.new(1 / cols, -math.ceil(6 * (cols - 1) / cols), 0, cellH)
+	lay.CellPadding = UDim2.fromOffset(6, 5)
+	lay.SortOrder = Enum.SortOrder.LayoutOrder
+	lay.Parent = grid
+	return grid
+end
+
+-- on / off chips that edit values in a table. items = {{text, key, after?}, ...}
+-- returns {key = repaint function}
+function UI.chips(card, tbl, items)
+	local grid = UI.grid(card, 26, 2)
+	local paints = {}
+	for i, it in ipairs(items) do
+		local b = makeButton(grid, it[1], "ghost", 10)
+		b.LayoutOrder = i
+		local function paint() setToggleStyle(b, tbl[it[2]], it[1], it[1]) end
+		paint()
+		paints[it[2]] = paint
+		b.MouseButton1Click:Connect(function()
+			tbl[it[2]] = not tbl[it[2]]
+			paint()
+			if it[3] then it[3]() end
+		end)
+	end
+	return paints
+end
+
+-- a row of colored preset buttons
+function UI.presetRow(card, presets, onPick)
+	local grid = UI.grid(card, 24, #presets)
+	for i, pr in ipairs(presets) do
+		local b = makeButton(grid, pr[1], "ghost", 9)
+		b.LayoutOrder = i
+		b.TextColor3 = pr[2]
+		b.MouseButton1Click:Connect(function() onPick(pr[2]) end)
+	end
+end
+
 --------------------------------------------------------------------
 -- Pages
 --------------------------------------------------------------------
@@ -2075,9 +2125,7 @@ end
 
 local normalPage  = newPage(true)
 local friendsPage = newPage(false)
-local allPage     = newPage(false)
-local toolsPage   = newPage(false)
-local vcPage      = newPage(false)
+local allPage     = newPage(false)   -- the Player tab
 local settingsPage = newPage(false)
 local espPage      = newPage(false)
 
@@ -2264,7 +2312,7 @@ local sameRefreshBtn, updatedLabel
 local rebuildOnlineLists          -- defined after the GUI (needs join logic)
 local fetchOnlineFriends          -- same
 local ready = false   -- becomes true when the loading bar is done
-local doRejoin, doEmote                 -- filled in by the Misc / Tools cards
+local doRejoin, doEmote                 -- filled in by the Player tab
 local speedSliderApi, flySliderApi      -- so commands can move the sliders too
 local toggleCommandBar                  -- filled in by the command bar
 local cmdKey = Enum.KeyCode.Semicolon   -- key that opens the command bar (rebindable)
@@ -2294,7 +2342,7 @@ for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
 -- Per-player save file (needs an executor with writefile / readfile).
 -- SAVED: key binds, the Keybinds switch, every switch and setting on the ESP tab,
 -- and the Freecam and Anti-AFK switches.
--- NOT saved: Fullbright, Walk speed and everything on the Tools tab.
+-- NOT saved: Fullbright, Walk speed, Fly, Noclip, Click teleport.
 local SAVE_FILE = "KRHUB_settings_" .. player.UserId .. ".json"
 KB.http = game:GetService("HttpService")
 KB.restore = {}        -- switches to turn back on once the window is ready
@@ -2997,89 +3045,79 @@ do
 	end
 end
 
--- Page: Misc -------------------------------------------------------------
-do
+-- Page: Player (movement, world, actions) -----------------------------------
+;(function()
 	local left  = makeColumn(allPage, "left")
 	local right = makeColumn(allPage, "right")
 
-	-- Fullbright (one switch)
-	do
-		local card, head = makeCard(left, "Fullbright")
-		addSwitch(head, "light_fb", function(on) setFullbright(on) end)
-		addHint(card, "Bright daylight everywhere, and removes fog, shadows, blur and color effects. Turn it off to put the lighting back how the game had it.")
+	-- LEFT: movement ---------------------------------------------------
+	local card = makeCard(left, "Movement")
+	UI.switchRow(card, "Fly", "fly", function(on) if on ~= flyOn then toggleFly() end end)
+	UI.switchRow(card, "Noclip", "noclip", setNoclip)
+	UI.switchRow(card, "Freecam", "freecam", function(on) if on ~= freecamOn then toggleFreecam() end end)
+	UI.switchRow(card, "Click teleport", "clickTp", setClickTp)
+	flySliderApi = UI.sliderRow(card, left, "Fly speed", 10, 300, flySpeed, "st/s", function(v) flySpeed = v end)
+	speedSliderApi = UI.sliderRow(card, left, "Walk speed", SPEED_MIN, SPEED_MAX, SPEED_DEFAULT, "st/s",
+		function(v) setSpeed(v) end,
+		function() setStatus("Walk speed: " .. tostring(customSpeed), C.ok) end)
+	local resetSpeed = makeButton(card, "RESET WALK SPEED", "ghost", 10)
+	resetSpeed.Size = UDim2.new(1, 0, 0, 24)
+	resetSpeed.LayoutOrder = nextOrder(card)
+	resetSpeed.MouseButton1Click:Connect(function()
+		customSpeed = nil
+		speedSliderApi.set(SPEED_DEFAULT)
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if hum then hum.WalkSpeed = SPEED_DEFAULT end
+		setStatus("Walk speed reset", C.muted)
+	end)
+
+	-- RIGHT: world + actions --------------------------------------------
+	local world = makeCard(right, "World")
+	UI.switchRow(world, "Fullbright", "light_fb", function(on) setFullbright(on) end)
+	UI.switchRow(world, "Anti-AFK", "antiAfk", function(on) if on ~= antiAfkOn then setAntiAfk(on) end end)
+
+	local act = makeCard(right, "Actions")
+	local grid = UI.grid(act, 30, 3)
+	local function action(text, style, order)
+		local b = makeButton(grid, text, style, 11)
+		b.LayoutOrder = order
+		return b
 	end
+	local rejoinBtn = action("REJOIN", "primary", 1)
+	local emoteBtn  = action("UGC EMOTE", "primary", 2)
+	local helloBtn  = action("HELLO", "primary", 3)
 
-	-- Freecam
+	-- rejoin: new server if you're alone, same server otherwise (retries 3x)
 	do
-		local card, head = makeCard(right, "Freecam")
-		addSwitch(head, "freecam", function(on)
-			if on ~= freecamOn then toggleFreecam() end
-		end)
-		addHint(card, "WASD move, E / Q up / down, hold right mouse to look, Shift = faster, scroll = speed. Default key: P (change it in Settings)")
-	end
-
-	-- Anti-AFK
-	do
-		local card, head = makeCard(right, "Anti-AFK")
-		addSwitch(head, "antiAfk", function(on)
-			if on ~= antiAfkOn then setAntiAfk(on) end
-		end)
-		addHint(card, "Stops you from being kicked for idling.")
-	end
-
-	-- Rejoin (a plain button, not a switch)
-	do
-		local card = makeCard(right, "Rejoin")
-		addHint(card, "Leaves and rejoins this server (or a new one if you're alone).")
-		local rejoinBtn = makeButton(card, "REJOIN", "primary", 12)
-		rejoinBtn.Name = "RejoinButton"
-		rejoinBtn.Size = UDim2.new(1, 0, 0, 34)
-		rejoinBtn.LayoutOrder = nextOrder(card)
-
 		local TeleportService = game:GetService("TeleportService")
-		local placeId, jobId = game.PlaceId, game.JobId
-		local MAX_RETRIES = 3
-		local attempts = 0
-		local rejoining = false
-
+		local attempts, rejoining = 0, false
+		local function giveUp()
+			rejoining = false
+			rejoinBtn.Text = "REJOIN"
+			setStatus("Rejoin failed", C.err)
+		end
 		local function go()
 			attempts += 1
-			local alone = #Players:GetPlayers() <= 1
 			local ok, err = pcall(function()
-				if alone then
-					TeleportService:Teleport(placeId, player)
+				if #Players:GetPlayers() <= 1 then
+					TeleportService:Teleport(game.PlaceId, player)
 				else
-					TeleportService:TeleportToPlaceInstance(placeId, jobId, player)
+					TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, player)
 				end
 			end)
 			if not ok then
 				warn("Rejoin failed: " .. tostring(err))
-				if attempts < MAX_RETRIES then
-					task.wait(1)
-					return go()
-				end
-				rejoining = false
-				rejoinBtn.Text = "REJOIN"
-				setStatus("Rejoin failed", C.err)
+				if attempts < 3 then task.wait(1) return go() end
+				giveUp()
 			end
 		end
-
 		TeleportService.TeleportInitFailed:Connect(function()
 			if not rejoining then return end
-			if attempts < MAX_RETRIES then
-				task.wait(1)
-				go()
-			else
-				rejoining = false
-				rejoinBtn.Text = "REJOIN"
-				setStatus("Rejoin failed", C.err)
-			end
+			if attempts < 3 then task.wait(1) go() else giveUp() end
 		end)
-
 		doRejoin = function()
 			if rejoining then return end
-			rejoining = true
-			attempts = 0
+			rejoining, attempts = true, 0
 			rejoinBtn.Text = "REJOINING..."
 			setStatus("Rejoining...", C.ok)
 			task.spawn(go)
@@ -3087,306 +3125,110 @@ do
 		rejoinBtn.MouseButton1Click:Connect(doRejoin)
 	end
 
-	-- Walk speed
-	do
-		local card, head = makeCard(right, "Walk speed")
-		local speedBox = makeValueBox(head, tostring(SPEED_DEFAULT), "st/s")
-		local slider = makeSlider(card, right, SPEED_MIN, SPEED_MAX, SPEED_DEFAULT, speedBox,
-			function(v) setSpeed(v) end,
-			function() setStatus("Walk speed: " .. tostring(customSpeed), C.ok) end
-		)
-		speedSliderApi = slider
-		local resetBtn = makeButton(card, "RESET WALK SPEED", "ghost", 12)
-		resetBtn.Name = "ResetSpeedButton"
-		resetBtn.Size = UDim2.new(1, 0, 0, 34)
-		resetBtn.LayoutOrder = nextOrder(card)
-		resetBtn.MouseButton1Click:Connect(function()
-			customSpeed = nil
-			slider.set(SPEED_DEFAULT)
-			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-			if hum then hum.WalkSpeed = SPEED_DEFAULT end
-			setStatus("Walk speed reset", C.muted)
-		end)
-	end
-
-	setAntiAfk(true) -- on by default
-end
-
--- Page: Tools --------------------------------------------------------------
-do
-	local left  = makeColumn(toolsPage, "left")
-	local right = makeColumn(toolsPage, "right")
-
-	-- Noclip
-	do
-		local card, head = makeCard(left, "Noclip")
-		addSwitch(head, "noclip", function(on) setNoclip(on) end)
-		addHint(card, "Walk through walls.")
-	end
-
-	-- Click teleport
-	do
-		local card, head = makeCard(left, "Click teleport")
-		addSwitch(head, "clickTp", function(on) setClickTp(on) end)
-		addHint(card, "When on, left click anywhere in the world to teleport there. When off, left click does nothing special.")
-	end
-
-	-- UGC emote (loads an outside emote menu script)
-	do
-		local card = makeCard(left, "UGC emote")
-		addHint(card, "Opens the UGC emote menu. Press it again to load a fresh copy.")
-		local emoteBtn = makeButton(card, "UGC EMOTE", "primary", 12)
-		emoteBtn.Name = "UgcEmoteButton"
-		emoteBtn.Size = UDim2.new(1, 0, 0, 34)
-		emoteBtn.LayoutOrder = nextOrder(card)
-
-		local EMOTE_URL = "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua"
-		local loadingEmote = false
-
-		doEmote = function()
-			if loadingEmote then return end
-			loadingEmote = true
-			emoteBtn.Text = "LOADING..."
-			setStatus("Loading UGC emote...", C.ok)
-
+	-- buttons that load an outside script
+	local function remote(btn, idle, name, url)
+		local loading = false
+		return function()
+			if loading then return end
+			loading = true
+			btn.Text = "LOADING..."
+			setStatus("Loading " .. name .. "...", C.ok)
 			task.spawn(function()
-				local ok, err = pcall(function()
-					loadstring(game:HttpGet(EMOTE_URL))()
-				end)
+				local ok, err = pcall(function() loadstring(game:HttpGet(url))() end)
 				if ok then
-					setStatus("UGC emote loaded", C.ok)
+					setStatus(name .. " loaded", C.ok)
 				else
-					warn("UGC emote failed: " .. tostring(err))
-					setStatus("UGC emote failed to load", C.err)
+					warn(name .. " failed: " .. tostring(err))
+					setStatus(name .. " failed to load", C.err)
 				end
-				emoteBtn.Text = "UGC EMOTE"
-				loadingEmote = false
+				btn.Text = idle
+				loading = false
 			end)
 		end
-		emoteBtn.MouseButton1Click:Connect(doEmote)
 	end
+	doEmote = remote(emoteBtn, "UGC EMOTE", "UGC emote", "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua")
+	emoteBtn.MouseButton1Click:Connect(doEmote)
+	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw"))
 
-	-- Hello (loads your own script, same look as UGC emote)
-	do
-		local card = makeCard(left, "Hello")
-		addHint(card, "Loads your Hello script. Press it again to load a fresh copy.")
-		local helloBtn = makeButton(card, "HELLO", "primary", 12)
-		helloBtn.Name = "HelloButton"
-		helloBtn.Size = UDim2.new(1, 0, 0, 34)
-		helloBtn.LayoutOrder = nextOrder(card)
+	-- Voice chat: same text and same button as the old VC tab
+	local vcCard = makeCard(right, "Voice chat")
+	addHint(vcCard, "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.")
+	local vcInfoBtn = makeButton(vcCard, "BYPASS VOICE CHAT", "ghost", 12)
+	vcInfoBtn.Name = "VoiceChatInfoButton"
+	vcInfoBtn.Size = UDim2.new(1, 0, 0, 36)
+	vcInfoBtn.LayoutOrder = nextOrder(vcCard)
+	vcInfoBtn.MouseButton1Click:Connect(function()
+		task.spawn(runVoiceChat)
+	end)
 
-		local HELLO_URL = "https://pastefy.app/YZoglOyJ/raw"
-		local loadingHello = false
-
-		helloBtn.MouseButton1Click:Connect(function()
-			if loadingHello then return end
-			loadingHello = true
-			helloBtn.Text = "LOADING..."
-			setStatus("Loading Hello...", C.ok)
-
-			task.spawn(function()
-				local ok, err = pcall(function()
-					loadstring(game:HttpGet(HELLO_URL))()
-				end)
-				if ok then
-					setStatus("Hello loaded", C.ok)
-				else
-					warn("Hello failed: " .. tostring(err))
-					setStatus("Hello failed to load", C.err)
-				end
-				helloBtn.Text = "HELLO"
-				loadingHello = false
-			end)
-		end)
-	end
-
-	-- Fly
-	do
-		local card, head = makeCard(right, "Fly")
-		addSwitch(head, "fly", function(on)
-			if on ~= flyOn then toggleFly() end
-		end)
-		addHint(card, "WASD to move in the direction you look, Space / E up, Ctrl / Q down.")
-
-		local speedRow = Instance.new("Frame")
-		speedRow.BackgroundTransparency = 1
-		speedRow.Size = UDim2.new(1, 0, 0, 26)
-		speedRow.LayoutOrder = nextOrder(card)
-		speedRow.Parent = card
-		label(speedRow, {
-			Text = "Fly speed",
-			Font = Enum.Font.Gotham,
-			TextSize = 12,
-			TextColor3 = C.muted,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Size = UDim2.new(1, -90, 1, 0),
-		})
-		local flyBox = makeValueBox(speedRow, tostring(flySpeed), "st/s")
-		flySliderApi = makeSlider(card, right, 10, 300, flySpeed, flyBox, function(v)
-			flySpeed = v
-		end)
-	end
-end
+	setAntiAfk(true) -- on by default
+end)()
 
 -- Page: ESP (all the ESP settings) ------------------------------------------
 ;(function()
 	local left  = makeColumn(espPage, "left")
 	local right = makeColumn(espPage, "right")
 	local cfg = boxCfg
-
-	-- a row with a label and an OFF / ON switch
-	local function switchRow(card, text, switchKey, onChange)
-		local row = Instance.new("Frame")
-		row.BackgroundTransparency = 1
-		row.Size = UDim2.new(1, 0, 0, 28)
-		row.LayoutOrder = nextOrder(card)
-		row.Parent = card
-		label(row, {
-			Text = text,
-			Font = Enum.Font.GothamMedium,
-			TextSize = 12,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			Size = UDim2.new(1, -100, 1, 0),
-		})
-		local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
-		seg.frame.AnchorPoint = Vector2.new(1, 0.5)
-		seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
-		seg.onSelect = function(idx)
-			onChange(idx == 2)
-			if updateUI then updateUI() end
-		end
-		if switchKey then switches[switchKey] = seg end
-		return seg
-	end
-
-	-- a switch that edits one value in boxCfg
-	local function cfgRow(card, text, key, after)
-		local seg = switchRow(card, text, nil, function(on)
-			cfg[key] = on
-			if after then after() end
-		end)
-		seg.set(cfg[key] and 2 or 1, true)
-		return seg
-	end
-
-	local function sliderRow(card, col, text, minV, maxV, startV, unit, onChange)
-		local r = Instance.new("Frame")
-		r.BackgroundTransparency = 1
-		r.Size = UDim2.new(1, 0, 0, 26)
-		r.LayoutOrder = nextOrder(card)
-		r.Parent = card
-		label(r, {
-			Text = text,
-			Font = Enum.Font.Gotham,
-			TextSize = 12,
-			TextColor3 = C.muted,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Size = UDim2.new(1, -90, 1, 0),
-		})
-		local box = makeValueBox(r, tostring(startV), unit)
-		return makeSlider(card, col, minV, maxV, startV, box, onChange)
-	end
-
-	local function presetRow(card, presets, onPick)
-		local row = Instance.new("Frame")
-		row.BackgroundTransparency = 1
-		row.Size = UDim2.new(1, 0, 0, 28)
-		row.LayoutOrder = nextOrder(card)
-		row.Parent = card
-		local n = #presets
-		for i, pr in ipairs(presets) do
-			local b = makeButton(row, pr[1], "ghost", 10)
-			b.TextColor3 = pr[2]
-			b.Size = UDim2.new(1 / n, -4, 1, 0)
-			b.Position = UDim2.new((i - 1) / n, 2, 0, 0)
-			b.MouseButton1Click:Connect(function() onPick(pr[2]) end)
-		end
-	end
-
 	local function rgb(c) return math.round(c.R * 255), math.round(c.G * 255), math.round(c.B * 255) end
 
-	-- LEFT ---------------------------------------------------------------
+	-- LEFT: what is on, and how it is drawn ---------------------------------
 	do
-		local card, head = makeCard(left, "ESP everyone")
-		addSwitch(head, "espAll_tab", function(on)
+		local card, head = makeCard(left, "ESP")
+		allInfo = label(head, {
+			Text = "ESP active on 0 players",
+			Font = Enum.Font.Gotham,
+			TextSize = 11,
+			TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, 0, 0, 0),
+			Size = UDim2.new(0.6, 0, 1, 0),
+		})
+		UI.switchRow(card, "ESP everyone", "espAll_tab", function(on)
 			if on ~= espAll then setEspAll(on) end
 		end)
-		addHint(card, "Turns ESP on for every player. For single players use the Teleport / Friends tabs or the esp <player> command.")
-		allInfo = label(card, {
-			Text = "ESP active on 0 players",
-			Font = Enum.Font.GothamMedium,
-			TextSize = 13,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Size = UDim2.new(1, 0, 0, 20),
-			LayoutOrder = nextOrder(card),
-		})
-		switchRow(card, "Names (one tag above the box)", "espNames_tab", function(on)
+		UI.switchRow(card, "Name tag above box", "espNames_tab", function(on)
 			if on ~= espNames then setEspNames(on) end
 		end)
-		local clearBtn = makeButton(card, "CLEAR ALL ESP", "ghost", 12)
-		clearBtn.Size = UDim2.new(1, 0, 0, 34)
-		clearBtn.LayoutOrder = nextOrder(card)
-		clearBtn.MouseButton1Click:Connect(clearAllEsp)
-	end
-
-	do
-		local card, head = makeCard(left, "Box ESP")
-		addSwitch(head, "boxEsp", function(on)
+		UI.switchRow(card, "Box ESP", "boxEsp", function(on)
 			cfg.enabled = on
 			applyEspToAll()
 		end)
-		addHint(card, "Draws the box, name, distance and health on every player that has ESP on.")
+		UI.switchRow(card, "Line to player", "boxTracers", function(on) cfg.tracers = on end)
 
-		local styleBtn = makeButton(card, "STYLE: " .. cfg.style:upper(), "ghost", 12)
-		styleBtn.Size = UDim2.new(1, 0, 0, 34)
-		styleBtn.LayoutOrder = nextOrder(card)
+		local ORIGINS = {"Player", "Bottom", "Center"}
+		local grid = UI.grid(card, 26, 3)
+		local styleBtn = makeButton(grid, "STYLE: " .. cfg.style:upper(), "ghost", 9)
+		styleBtn.LayoutOrder = 1
 		styleBtn.MouseButton1Click:Connect(function()
 			cfg.style = (cfg.style == "Box") and "Corners" or "Box"
 			styleBtn.Text = "STYLE: " .. cfg.style:upper()
 		end)
-	end
-
-	do
-		local card = makeCard(left, "Elements")
-		cfgRow(card, "Display name (off = username)", "displayName")
-		cfgRow(card, "Distance", "distance")
-		cfgRow(card, "Distance in meters", "meters")
-		cfgRow(card, "Health bar", "health")
-		cfgRow(card, "Black outline", "outline")
-	end
-
-	do
-		local card, head = makeCard(left, "Line to player")
-		addSwitch(head, "boxTracers", function(on) cfg.tracers = on end)
-		addHint(card, "Draws a line between you and every ESP'd player, like the old CS cheats.")
-
-		local ORIGINS = {"Player", "Bottom", "Center"}
-		local ORIGIN_TEXT = {Player = "MY PLAYER", Bottom = "BOTTOM OF SCREEN", Center = "CENTER OF SCREEN"}
-		local originBtn = makeButton(card, "STARTS AT: " .. ORIGIN_TEXT[cfg.tracerFrom], "ghost", 12)
-		originBtn.Size = UDim2.new(1, 0, 0, 34)
-		originBtn.LayoutOrder = nextOrder(card)
+		local originBtn = makeButton(grid, "FROM: " .. cfg.tracerFrom:upper(), "ghost", 9)
+		originBtn.LayoutOrder = 2
 		originBtn.MouseButton1Click:Connect(function()
 			local i = table.find(ORIGINS, cfg.tracerFrom) or 1
 			cfg.tracerFrom = ORIGINS[i % #ORIGINS + 1]
-			originBtn.Text = "STARTS AT: " .. ORIGIN_TEXT[cfg.tracerFrom]
+			originBtn.Text = "FROM: " .. cfg.tracerFrom:upper()
 		end)
-
-		sliderRow(card, left, "Line thickness", 1, 6, cfg.tracerThickness, "px", function(v)
-			cfg.tracerThickness = v
-		end)
+		local clearBtn = makeButton(grid, "CLEAR ALL", "ghost", 9)
+		clearBtn.LayoutOrder = 3
+		clearBtn.MouseButton1Click:Connect(clearAllEsp)
 	end
 
+	local chipPaint
 	do
-		local card = makeCard(left, "Filters & extras")
-		cfgRow(card, "Hide teammates", "teamCheck")
-		cfgRow(card, "Use team colors", "teamColor")
-		cfgRow(card, "Rainbow", "rainbow")
-		cfgRow(card, "Text uses box color", "textSame")
-		cfgRow(card, "Chams (old highlight)", "chams", applyEspToAll)
+		local card = makeCard(left, "Options")
+		chipPaint = UI.chips(card, cfg, {
+			{"Display name", "displayName"}, {"Distance", "distance"},
+			{"In meters", "meters"},         {"Health bar", "health"},
+			{"Outline", "outline"},          {"Hide teammates", "teamCheck"},
+			{"Team colors", "teamColor"},    {"Rainbow", "rainbow"},
+			{"Text = box color", "textSame"}, {"Chams", "chams", applyEspToAll},
+		})
 	end
 
-	-- RIGHT --------------------------------------------------------------
+	-- RIGHT: colors and sizes ---------------------------------------------
 	do
 		local card = makeCard(right, "Box color")
 		local rS, gS, bS
@@ -3396,7 +3238,7 @@ end
 			t[i] = v
 			cfg.color = Color3.fromRGB(t[1], t[2], t[3])
 		end
-		presetRow(card, {
+		UI.presetRow(card, {
 			{"GREEN",  Color3.fromRGB(0, 255, 0)},
 			{"RED",    Color3.fromRGB(255, 50, 50)},
 			{"CYAN",   Color3.fromRGB(0, 230, 255)},
@@ -3408,14 +3250,14 @@ end
 			rS.set(r) gS.set(g) bS.set(b)
 		end)
 		local r0, g0, b0 = rgb(cfg.color)
-		rS = sliderRow(card, right, "Red",   0, 255, r0, "", function(v) chan(1, v) end)
-		gS = sliderRow(card, right, "Green", 0, 255, g0, "", function(v) chan(2, v) end)
-		bS = sliderRow(card, right, "Blue",  0, 255, b0, "", function(v) chan(3, v) end)
+		rS = UI.sliderRow(card, right, "Red",   0, 255, r0, "", function(v) chan(1, v) end)
+		gS = UI.sliderRow(card, right, "Green", 0, 255, g0, "", function(v) chan(2, v) end)
+		bS = UI.sliderRow(card, right, "Blue",  0, 255, b0, "", function(v) chan(3, v) end)
 	end
 
 	do
 		local card = makeCard(right, "Text color")
-		presetRow(card, {
+		UI.presetRow(card, {
 			{"WHITE",  Color3.fromRGB(255, 255, 255)},
 			{"GREEN",  Color3.fromRGB(0, 255, 0)},
 			{"YELLOW", Color3.fromRGB(255, 220, 40)},
@@ -3424,35 +3266,19 @@ end
 		}, function(col)
 			cfg.textColor = col
 			cfg.textSame = false
+			chipPaint.textSame()
 		end)
-		addHint(card, "Picking a color here turns off \"Text uses box color\" for new frames.")
 	end
 
 	do
 		local card = makeCard(right, "Size & range")
-		sliderRow(card, right, "Box thickness", 1, 6, cfg.thickness, "px", function(v) cfg.thickness = v end)
-		sliderRow(card, right, "Box fill",      0, 100, cfg.fill, "%", function(v) cfg.fill = v end)
-		sliderRow(card, right, "Text size",     8, 24, cfg.textSize, "px", function(v) cfg.textSize = v end)
-		sliderRow(card, right, "Max distance",  50, 5000, cfg.maxDist, "st", function(v) cfg.maxDist = v end)
+		UI.sliderRow(card, right, "Box thickness", 1, 6, cfg.thickness, "px", function(v) cfg.thickness = v end)
+		UI.sliderRow(card, right, "Line thickness", 1, 6, cfg.tracerThickness, "px", function(v) cfg.tracerThickness = v end)
+		UI.sliderRow(card, right, "Box fill",      0, 100, cfg.fill, "%", function(v) cfg.fill = v end)
+		UI.sliderRow(card, right, "Text size",     8, 24, cfg.textSize, "px", function(v) cfg.textSize = v end)
+		UI.sliderRow(card, right, "Max distance",  50, 5000, cfg.maxDist, "st", function(v) cfg.maxDist = v end)
 	end
 end)()
-
--- Page: VC ------------------------------------------------------------------
-do
-	local left  = makeColumn(vcPage, "left")
-	makeColumn(vcPage, "right")
-
-	local card = makeCard(left, "Voice chat")
-	addHint(card, "Voice Chat KRHUB adalah voice chat yang terbaik sepanjang masa, ini sangat bersejarah bagi KRH.")
-
-	local vcInfoBtn = makeButton(card, "BYPASS VOICE CHAT", "ghost", 12)
-	vcInfoBtn.Name = "VoiceChatInfoButton"
-	vcInfoBtn.Size = UDim2.new(1, 0, 0, 36)
-	vcInfoBtn.LayoutOrder = nextOrder(card)
-	vcInfoBtn.MouseButton1Click:Connect(function()
-		task.spawn(runVoiceChat)
-	end)
-end
 
 --------------------------------------------------------------------
 -- Sync every button from the real state
@@ -3492,7 +3318,7 @@ updateUI = function()
 		setToggleStyle(btn, p ~= nil and wantsEsp(p), "ESP", "ESP")
 	end
 
-	-- Misc tab
+	-- ESP tab
 	if allInfo then
 		local n = countEsp()
 		allInfo.Text = ("ESP active on %d player%s"):format(n, n == 1 and "" or "s")
@@ -3544,8 +3370,8 @@ refreshFriends()
 --------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Tools = 5, VC = 6, Settings = 7}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Tools = toolsPage, VC = vcPage, Settings = settingsPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Settings = 5}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Settings = settingsPage}
 
 local function paintTabs(name)
 	for key, btn in pairs(TAB_BUTTONS) do
@@ -3668,7 +3494,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end)
 
-
 --------------------------------------------------------------------
 -- Settings tab (command bar key + a key for every feature)
 --------------------------------------------------------------------
@@ -3788,20 +3613,24 @@ end
 		captureConn = UserInputService.InputBegan:Connect(onCaptureKey)
 	end
 
-	-- LEFT: the command bar key (the "prefix") ---------------------------
+	-- LEFT: command bar key, saving, command list --------------------------
 	local card = makeCard(left, "Command bar key")
-	addHint(card, "Press this key anywhere in the game to open the command bar. Click the key below, then press the new key. Esc cancels.")
+	local krow = Instance.new("Frame")
+	krow.BackgroundTransparency = 1
+	krow.Size = UDim2.new(1, 0, 0, 30)
+	krow.LayoutOrder = nextOrder(card)
+	krow.Parent = card
 
-	local keyBtn = makeButton(card, keyName(cmdKey), "ghost", 15)
+	local keyBtn = makeButton(krow, keyName(cmdKey), "ghost", 13)
 	keyBtn.Name = "CommandKeyButton"
-	keyBtn.Size = UDim2.new(1, 0, 0, 40)
-	keyBtn.LayoutOrder = nextOrder(card)
+	keyBtn.Size = UDim2.new(1, -78, 1, 0)
 	buttons.cmd = keyBtn
 	keyBtn.MouseButton1Click:Connect(function() startCapture("cmd") end)
 
-	local resetBtn = makeButton(card, "RESET TO ;", "ghost", 11)
-	resetBtn.Size = UDim2.new(1, 0, 0, 30)
-	resetBtn.LayoutOrder = nextOrder(card)
+	local resetBtn = makeButton(krow, "RESET TO ;", "ghost", 10)
+	resetBtn.AnchorPoint = Vector2.new(1, 0)
+	resetBtn.Position = UDim2.new(1, 0, 0, 0)
+	resetBtn.Size = UDim2.fromOffset(72, 30)
 	resetBtn.MouseButton1Click:Connect(function()
 		if captureId then stopCapture() end
 		local owner = ownerOf(Enum.KeyCode.Semicolon, "cmd")
@@ -3814,52 +3643,52 @@ end
 		repaint("cmd", false)
 		setStatus("Command bar key: ;", C.muted)
 	end)
-
-	addHint(card, "Your keys, the ESP tab and the Freecam / Anti-AFK switches are saved for each Roblox account (needs an executor with file saving). Fullbright, walk speed and the Tools tab are not saved.")
+	addHint(card, "Opens the command bar anywhere. Click the key, then press a new one. Esc cancels.")
 
 	local scard = makeCard(left, "Saving")
-	local saveInfo = label(scard, {
+	local srow = Instance.new("Frame")
+	srow.BackgroundTransparency = 1
+	srow.Size = UDim2.new(1, 0, 0, 28)
+	srow.LayoutOrder = nextOrder(scard)
+	srow.Parent = scard
+	local saveInfo = label(srow, {
 		Text = "Starting...",
 		Font = Enum.Font.Gotham,
-		TextSize = 11,
+		TextSize = 10,
 		TextColor3 = C.muted,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		LayoutOrder = nextOrder(scard),
+		Size = UDim2.new(1, -84, 1, 0),
 	})
 	KB.report = function(text, ok)
 		saveInfo.Text = text
 		saveInfo.TextColor3 = ok and C.mint or C.err
 	end
-	local saveBtn = makeButton(scard, "SAVE NOW", "ghost", 12)
-	saveBtn.Size = UDim2.new(1, 0, 0, 34)
-	saveBtn.LayoutOrder = nextOrder(scard)
+	local saveBtn = makeButton(srow, "SAVE NOW", "ghost", 10)
+	saveBtn.AnchorPoint = Vector2.new(1, 0.5)
+	saveBtn.Position = UDim2.new(1, 0, 0.5, 0)
+	saveBtn.Size = UDim2.fromOffset(78, 26)
 	saveBtn.MouseButton1Click:Connect(function()
 		if not KB.started then return end
 		KB.flush(true)
 		setStatus("Save requested", C.muted)
 	end)
+	addHint(scard, "Keys, ESP settings, Freecam and Anti-AFK are saved per account (needs file saving in your executor).")
 
 	local ref = makeCard(left, "Commands")
 	addHint(ref, table.concat({
-		"goto <player>",
-		"spectate <player>  ·  unspectate",
-		"esp on|off|<player>  ·  espnames on|off  ·  clearesp",
-		"freecam  noclip  fly  clicktp  antiafk  (on|off)",
-		"fullbright  keybinds  (on|off)",
-		"speed <number|reset>  ·  flyspeed <number>",
+		"goto / spectate <player>  ·  unspectate",
+		"esp on|off|<player>  ·  espnames  ·  clearesp",
+		"freecam noclip fly clicktp antiafk fullbright",
+		"keybinds  (on|off)   speed / flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
-		"",
-		"Tab = autocomplete   Up / Down = choose   Enter = run",
+		"Tab = complete   Up / Down = choose   Enter = run",
 	}, "\n"))
 
-	-- RIGHT: master switch, then a key for every feature ---------------------
-	local kcard, khead = makeCard(right, "Keybinds")
-	addSwitch(khead, "keybinds", function(on)
+	-- RIGHT: one card, master switch in the header, one line per key ---------
+	local pcard, phead = makeCard(right, "Keybinds")
+	addSwitch(phead, "keybinds", function(on)
 		KB.on = on
 		saveSettings()
 		setStatus(
@@ -3867,16 +3696,13 @@ end
 			on and C.ok or C.muted
 		)
 	end)
-	addHint(kcard, "Turns the feature keys below on or off. The window key and the command bar key always work.")
-
-	local pcard = makeCard(right, "Set keybinds")
-	addHint(pcard, "Click a key, then press the new one. Esc cancels. Press × to unbind a key (Backspace works too).")
+	addHint(pcard, "Click a key, then press the new one. Esc cancels. × unbinds. The window and command bar keys always work.")
 
 	for _, def in ipairs(KB.defs) do
 		local row = Instance.new("Frame")
 		row.Name = "Bind_" .. def.id
 		row.BackgroundTransparency = 1
-		row.Size = UDim2.new(1, 0, 0, 30)
+		row.Size = UDim2.new(1, 0, 0, 26)
 		row.LayoutOrder = nextOrder(pcard)
 		row.Parent = pcard
 
@@ -3886,14 +3712,14 @@ end
 			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			Size = UDim2.new(1, -140, 1, 0),
+			Size = UDim2.new(1, -126, 1, 0),
 		})
 
 		-- key button (click, then press a key)
 		local b = makeButton(row, labelFor(def.id), "ghost", 11)
 		b.AnchorPoint = Vector2.new(1, 0.5)
-		b.Position = UDim2.new(1, -32, 0.5, 0)
-		b.Size = UDim2.fromOffset(100, 26)
+		b.Position = UDim2.new(1, -28, 0.5, 0)
+		b.Size = UDim2.fromOffset(94, 24)
 		buttons[def.id] = b
 		b.MouseButton1Click:Connect(function() startCapture(def.id) end)
 
@@ -3902,7 +3728,7 @@ end
 		u.Name = "UnbindButton"
 		u.AnchorPoint = Vector2.new(1, 0.5)
 		u.Position = UDim2.new(1, 0, 0.5, 0)
-		u.Size = UDim2.fromOffset(26, 26)
+		u.Size = UDim2.fromOffset(24, 24)
 		u.TextColor3 = KB.binds[def.id] and C.text or C.faint
 		unbinds[def.id] = u
 		u.MouseButton1Click:Connect(function()
@@ -3918,8 +3744,8 @@ end
 		end)
 	end
 
-	local resetAll = makeButton(pcard, "RESET ALL KEYS", "ghost", 11)
-	resetAll.Size = UDim2.new(1, 0, 0, 30)
+	local resetAll = makeButton(pcard, "RESET ALL KEYS", "ghost", 10)
+	resetAll.Size = UDim2.new(1, 0, 0, 26)
 	resetAll.LayoutOrder = nextOrder(pcard)
 	resetAll.MouseButton1Click:Connect(function()
 		if captureId then stopCapture() end
@@ -4280,9 +4106,9 @@ end)()
 		run = function() doEmote() return true, "Loading UGC emote..." end,
 	})
 
-	local TAB_NAMES = {teleport = "Normal", friends = "Friends", misc = "All", esp = "ESP", tools = "Tools", settings = "Settings"}
+	local TAB_NAMES = {teleport = "Normal", friends = "Friends", player = "All", misc = "All", tools = "All", vc = "All", esp = "ESP", settings = "Settings"}
 	add({
-		name = "tab", usage = "tab teleport|friends|misc|esp|tools|settings",
+		name = "tab", usage = "tab teleport|friends|player|esp|settings",
 		suggest = function()
 			return {
 				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""},
@@ -4291,7 +4117,7 @@ end)()
 		end,
 		run = function(arg)
 			local key = TAB_NAMES[arg:lower()]
-			if not key then return false, "Usage: tab teleport|friends|misc|esp|tools|settings" end
+			if not key then return false, "Usage: tab teleport|friends|player|esp|settings" end
 			setVisible(true)
 			switchTab(key)
 			return true, "Opened " .. arg:lower()
@@ -4638,7 +4464,7 @@ end)()
 -- Resizing (drag the grip in the bottom right corner)
 --------------------------------------------------------------------
 ;(function()
-	local MIN_W, MIN_H, MAX_W, MAX_H = 700, 380, 1000, 720
+	local MIN_W, MIN_H, MAX_W, MAX_H = 640, 380, 1000, 720
 
 	local grip = Instance.new("TextButton")
 	grip.Name = "ResizeGrip"
