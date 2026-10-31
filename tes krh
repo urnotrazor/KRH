@@ -3486,10 +3486,13 @@ end
 -- above their head. It follows them wherever they go; click it to teleport to them.
 do
 	local bubbles = {}   -- [UserId] = BillboardGui
+	local parts = {}     -- [UserId] = {btn, ring, head, a}  (a = current opacity 0..1)
+	local FAR, NEAR = 45, 20   -- >= FAR fully visible, <= NEAR fully faded
 
 	local function remove(userId)
 		local b = bubbles[userId]
 		if b then b:Destroy() bubbles[userId] = nil end
+		parts[userId] = nil
 	end
 
 	local function make(p, head)
@@ -3521,6 +3524,7 @@ do
 
 		b.Parent = playerGui
 		bubbles[p.UserId] = b
+		parts[p.UserId] = {btn = btn, ring = ring, head = head, a = 1}
 	end
 
 	local function refresh()
@@ -3556,6 +3560,28 @@ do
 		setStatus(state and "Friend avatars on" or "Friend avatars off", state and C.ok or C.muted)
 		if updateUI then updateUI() end
 	end
+
+	-- distance fade: 45+ studs = fully visible, fading out as you get closer, gone at 20
+	RunService.RenderStepped:Connect(function(dt)
+		if not next(parts) then return end
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not root then return end
+		local k = 1 - math.exp(-10 * dt)
+		for _, d in pairs(parts) do
+			local head = d.head
+			if head and head.Parent then
+				local dist = (head.Position - root.Position).Magnitude
+				local target = math.clamp((dist - NEAR) / (FAR - NEAR), 0, 1)
+				d.a += (target - d.a) * k
+				local t = 1 - d.a
+				d.btn.ImageTransparency = t
+				d.btn.BackgroundTransparency = t
+				d.ring.Transparency = t
+				d.btn.Active = d.a > 0.15   -- a faded circle can't be clicked
+			end
+		end
+	end)
 
 	-- keep them in step: respawns, new heads, friends joining and leaving
 	task.spawn(function()
