@@ -3526,49 +3526,93 @@ end
 	local hoverHL = makeHL(D.accent, Color3.fromRGB(255, 255, 255), 1)
 	local selHL   = makeHL(D.accent, D.accent, 0.7)
 
-	-- name tag that follows the cursor
-	local tag = Instance.new("TextLabel")
-	tag.AutomaticSize = Enum.AutomaticSize.XY
-	tag.BackgroundColor3 = D.bar
+	-- info card at the bottom of the screen for whatever you hover
+	local tag = Instance.new("CanvasGroup")
+	tag.AnchorPoint = Vector2.new(0.5, 1)
+	tag.Position = UDim2.new(0.5, 0, 1, -22)
+	tag.Size = UDim2.fromOffset(380, 0)
+	tag.AutomaticSize = Enum.AutomaticSize.Y
+	tag.BackgroundColor3 = Color3.fromRGB(16, 16, 18)
+	tag.BackgroundTransparency = 0.08
 	tag.BorderSizePixel = 0
-	tag.Font = Enum.Font.GothamMedium
-	tag.TextSize = 13
-	tag.TextColor3 = D.text
+	tag.GroupTransparency = 1
 	tag.Visible = false
 	tag.ZIndex = 5
 	tag.Parent = dg
-	corner(tag, 6)
-	stroke(tag, D.accent, 1, 0)
+	corner(tag, 12)
+	stroke(tag, Color3.new(1, 1, 1), 1, 0.85)
 	local tagPad = Instance.new("UIPadding")
-	tagPad.PaddingLeft, tagPad.PaddingRight = UDim.new(0, 8), UDim.new(0, 8)
-	tagPad.PaddingTop, tagPad.PaddingBottom = UDim.new(0, 4), UDim.new(0, 4)
+	tagPad.PaddingLeft, tagPad.PaddingRight = UDim.new(0, 14), UDim.new(0, 14)
+	tagPad.PaddingTop, tagPad.PaddingBottom = UDim.new(0, 10), UDim.new(0, 10)
 	tagPad.Parent = tag
+	local tagList = Instance.new("UIListLayout")
+	tagList.Padding = UDim.new(0, 2)
+	tagList.SortOrder = Enum.SortOrder.LayoutOrder
+	tagList.Parent = tag
+	local function tagLine(order, size, color, font)
+		return label(tag, {Text = "", TextSize = size, TextColor3 = color, Font = font,
+			TextXAlignment = Enum.TextXAlignment.Left, TextWrapped = true,
+			AutomaticSize = Enum.AutomaticSize.Y, Size = UDim2.new(1, 0, 0, 0), LayoutOrder = order})
+	end
+	local tagName  = tagLine(1, 15, D.text, Enum.Font.GothamBold)
+	local tagClass = tagLine(2, 12, D.sub, Enum.Font.GothamMedium)
+	local tagPath  = tagLine(3, 12, Color3.fromRGB(105, 105, 115), Enum.Font.Gotham)
+
+	local function dotPath(inst)
+		local parts, cur = {}, inst
+		while cur and cur ~= game do table.insert(parts, 1, cur.Name) cur = cur.Parent end
+		return table.concat(parts, ".")
+	end
+
+	local tagShown, tagFor = false, nil
+	local function showTag(part)
+		if tagFor ~= part then
+			tagFor = part
+			tagName.Text = part.Name
+			tagClass.Text = part.ClassName
+			tagPath.Text = dotPath(part)
+		end
+		if not tagShown then
+			tagShown = true
+			tag.Visible = true
+			tween(tag, 0.15, {GroupTransparency = 0})
+		end
+	end
+	local function hideTag()
+		if not tagShown then return end
+		tagShown, tagFor = false, nil
+		local t = tween(tag, 0.15, {GroupTransparency = 1})
+		t.Completed:Connect(function() if not tagShown then tag.Visible = false end end)
+	end
 
 	-- window: a small tree of the picked part, its parent and its children ----
 	local ROW = 24
 	local win = Instance.new("CanvasGroup")
-	win.Size = UDim2.fromOffset(330, 440)
+	win.Size = UDim2.fromOffset(330, 470)
 	win.Position = UDim2.fromOffset(90, 110)
-	win.BackgroundColor3 = Color3.new(1, 1, 1)
+	win.BackgroundColor3 = Color3.fromRGB(16, 16, 18)
 	win.BackgroundTransparency = 0.08
 	win.BorderSizePixel = 0
 	win.GroupTransparency = 1
 	win.Visible = false
 	win.Parent = dg
-	corner(win, 14)
-	local winGrad = Instance.new("UIGradient")
-	winGrad.Color = ColorSequence.new(Color3.fromRGB(36, 36, 40), Color3.fromRGB(12, 12, 14))
-	winGrad.Rotation = 90
-	winGrad.Parent = win
-	local winStroke = stroke(win, Color3.new(1, 1, 1), 1, 0.82)
+	corner(win, 12)
+	stroke(win, Color3.new(1, 1, 1), 1, 0.85)
 
 	local title = Instance.new("Frame")
-	title.Size = UDim2.new(1, 0, 0, 38)
+	title.Size = UDim2.new(1, 0, 0, 78)
 	title.BackgroundTransparency = 1
 	title.Parent = win
 	local titleL = label(title, {Text = "Dex", Font = Enum.Font.GothamBold, TextSize = 15, TextColor3 = D.text,
 		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(1, -52, 1, 0)})
+		Position = UDim2.fromOffset(14, 12), Size = UDim2.new(1, -52, 0, 20)})
+	local classL = label(title, {Text = "", Font = Enum.Font.GothamMedium, TextSize = 12, TextColor3 = D.sub,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(14, 33), Size = UDim2.new(1, -28, 0, 16)})
+	local pathL = label(title, {Text = "", Font = Enum.Font.Gotham, TextSize = 12,
+		TextColor3 = Color3.fromRGB(105, 105, 115), TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(14, 50), Size = UDim2.new(1, -28, 0, 16)})
 	local closeB = Instance.new("TextButton")
 	closeB.Text = "X"
 	closeB.Font = Enum.Font.GothamBold
@@ -3576,7 +3620,7 @@ end
 	closeB.TextColor3 = D.sub
 	closeB.BackgroundTransparency = 1
 	closeB.AnchorPoint = Vector2.new(1, 0.5)
-	closeB.Position = UDim2.new(1, -8, 0.5, 0)
+	closeB.Position = UDim2.new(1, -8, 0, 22)
 	closeB.Size = UDim2.fromOffset(28, 28)
 	closeB.Parent = title
 	closeB.MouseEnter:Connect(function() tween(closeB, 0.12, {TextColor3 = D.text}) end)
@@ -3593,8 +3637,8 @@ end
 	list.BackgroundColor3 = Color3.new(0, 0, 0)
 	list.BackgroundTransparency = 0.55
 	list.BorderSizePixel = 0
-	list.Position = UDim2.fromOffset(12, 48)
-	list.Size = UDim2.new(1, -24, 1, -214)
+	list.Position = UDim2.fromOffset(12, 88)
+	list.Size = UDim2.new(1, -24, 1, -256)
 	list.CanvasSize = UDim2.new()
 	list.ScrollBarThickness = 3
 	list.ScrollBarImageColor3 = D.sub
@@ -3708,11 +3752,15 @@ end
 
 	local function showProps()
 		local sel = selected
-		if not sel then propsL.Text = "" titleL.Text = "Dex" return end
+		if not sel then
+			propsL.Text, titleL.Text, classL.Text, pathL.Text = "", "Dex", "", ""
+			return
+		end
 		titleL.Text = sel.Name
+		classL.Text = sel.ClassName
+		pathL.Text = dotPath(sel)
 		local L = {}
 		local function add(k, v) L[#L + 1] = ("%-11s %s"):format(k, tostring(v)) end
-		add("ClassName", sel.ClassName)
 		add("Parent", sel.Parent and sel.Parent.Name or "nil")
 		pcall(function()
 			if sel:IsA("BasePart") then
@@ -3940,13 +3988,7 @@ end
 		else
 			setAdornee(hoverHL, nil)
 		end
-		if part then
-			tag.Text = part.Name .. "  (" .. part.ClassName .. ")"
-			tag.Position = UDim2.fromOffset(m.X + 16, m.Y + 18)
-			tag.Visible = true
-		else
-			tag.Visible = false
-		end
+		if part then showTag(part) else hideTag() end
 	end)
 
 	dexOn = false
@@ -3960,7 +4002,7 @@ end
 		else
 			CAS:UnbindAction("KRHUBDex")
 			setAdornee(hoverHL, nil)
-			tag.Visible = false
+			hideTag()
 			select(nil)
 			closeWin()
 		end
