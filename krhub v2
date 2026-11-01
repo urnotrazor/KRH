@@ -4684,14 +4684,13 @@ refreshFriends()
 				if p ~= player and p.Character then
 					for _, t in ipairs(p.Character:GetChildren()) do
 						if t:IsA("Tool") then
-							local seat, handle
+							-- only tools with a seat, and only while nobody is sitting on it
 							for _, d in ipairs(t:GetDescendants()) do
-								if not seat and (d:IsA("Seat") or d:IsA("VehicleSeat")) then seat = d end
-								if not handle and d:IsA("BasePart") then handle = d end
+								if (d:IsA("Seat") or d:IsA("VehicleSeat")) and not d.Occupant then
+									out[#out + 1] = {p = p, tool = t, seat = d}
+									break
+								end
 							end
-							handle = t:FindFirstChild("Handle") or handle
-							if handle and not handle:IsA("BasePart") then handle = nil end
-							if seat or handle then out[#out + 1] = {p = p, tool = t, seat = seat, handle = handle} end
 						end
 					end
 				end
@@ -4703,26 +4702,10 @@ refreshFriends()
 			local _, hum, root = mine()
 			if not hum or not root then setStatus("You have no character right now", C.err) return end
 			stopRide()
-			if e.seat and not e.seat.Occupant then   -- the tool has a real seat
-				root.CFrame = e.seat.CFrame * CFrame.new(0, 2, 0)
-				pcall(function() e.seat:Sit(hum) end)
-				setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
-				return
-			end
-			if not e.handle then setStatus("That tool has nothing to sit on", C.err) return end
-			-- no seat: sit and stay on top of the tool wherever it goes
-			rideInfo = e
-			rideConn = RunService.Heartbeat:Connect(function()
-				local _, h2, r2 = mine()
-				if not h2 or not r2 or not e.tool.Parent or not e.handle.Parent then
-					stopRide("The tool is gone, you got off")
-					return
-				end
-				r2.CFrame = e.handle.CFrame * CFrame.new(0, 2.2, 0)
-				r2.AssemblyLinearVelocity = Vector3.zero
-				h2.Sit = true
-			end)
-			setStatus(("Sitting on %s's %s (press Space to get off)"):format(e.p.DisplayName, e.tool.Name), C.ok)
+			if e.seat.Occupant then setStatus("Someone is already sitting there", C.err) return end
+			root.CFrame = e.seat.CFrame * CFrame.new(0, 2, 0)
+			pcall(function() e.seat:Sit(hum) end)
+			setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
 		end
 
 		function FND.unsit()
@@ -4731,11 +4714,9 @@ refreshFriends()
 			if hum then hum.Sit = false hum.Jump = true end
 		end
 		function FND.sitPlayer(p)
-			local pick
 			for _, e in ipairs(scanTools()) do
-				if e.p == p and (not pick or (e.seat and not pick.seat)) then pick = e end
+				if e.p == p then sitOn(e) return true end
 			end
-			if pick then sitOn(pick) return true end
 			return false
 		end
 
@@ -4746,7 +4727,7 @@ refreshFriends()
 
 		-- the card
 		local card = makeCard(right, "Sit on tools")
-		addHint(card, "Tools other players are holding right now. Click one to sit on it.")
+		addHint(card, "Tools with a free seat that other players are holding right now. Click one to sit on it.")
 		local listF = Instance.new("ScrollingFrame")
 		listF.BackgroundTransparency = 1
 		listF.BorderSizePixel = 0
@@ -4770,7 +4751,7 @@ refreshFriends()
 		local function refreshList()
 			local items = scanTools()
 			local sig = {}
-			for _, e in ipairs(items) do sig[#sig + 1] = e.p.UserId .. e.tool.Name .. tostring(e.seat ~= nil) end
+			for _, e in ipairs(items) do sig[#sig + 1] = e.p.UserId .. e.tool.Name end
 			sig = table.concat(sig, "|")
 			if sig == lastSig then return end
 			lastSig = sig
@@ -4778,12 +4759,12 @@ refreshFriends()
 				if c:IsA("GuiObject") then c:Destroy() end
 			end
 			if #items == 0 then
-				label(listF, {Text = "Nobody is holding a tool", TextSize = 12, TextColor3 = C.faint,
+				label(listF, {Text = "No tool with a free seat", TextSize = 12, TextColor3 = C.faint,
 					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, 22)})
 				return
 			end
 			for i, e in ipairs(items) do
-				local b = makeButton(listF, ("%s - %s%s"):format(e.p.DisplayName, e.tool.Name, e.seat and "  [seat]" or ""), "ghost", 11)
+				local b = makeButton(listF, ("%s - %s"):format(e.p.DisplayName, e.tool.Name), "ghost", 11)
 				b.Size = UDim2.new(1, -6, 0, 26)
 				b.LayoutOrder = i
 				b.MouseButton1Click:Connect(function() sitOn(e) end)
@@ -5559,7 +5540,7 @@ end)()
 			local t, err = needPlayer(arg, "Usage: sit <player>")
 			if not t then return false, err end
 			if FND.sitPlayer(t) then return true, "Sitting on " .. t.DisplayName .. "'s tool" end
-			return false, t.DisplayName .. " isn't holding a tool"
+			return false, t.DisplayName .. " has no tool with a free seat"
 		end,
 	})
 	add({name = "unsit", usage = "unsit", run = function() FND.unsit() return true, "You got off" end})
