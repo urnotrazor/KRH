@@ -3386,7 +3386,7 @@ end
 	doEmote = remote(emoteBtn, "UGC EMOTE", "UGC emote", "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua")
 	emoteBtn.MouseButton1Click:Connect(doEmote)
 	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw", true))
-	wheelBtn.MouseButton1Click:Connect(remote(wheelBtn, "WHEEL", "Wheel", "loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Crazy-touch-fling-works-with-almost-every-games-48090"))()"))
+	wheelBtn.MouseButton1Click:Connect(remote(wheelBtn, "WHEEL", "Wheel", "https://rawscripts.net/raw/Universal-Script-Crazy-touch-fling-works-with-almost-every-games-48090"))
 
 	-- Voice chat: same text and same button as the old VC tab
 	local vcCard = makeCard(right, "Voice chat")
