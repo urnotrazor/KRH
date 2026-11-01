@@ -4723,7 +4723,12 @@ refreshFriends()
 			pcall(function() e.seat:Sit(hum) end)
 			if FND.sitAutoOff then   -- sit, then stand right back up: works like a teleport
 				setStatus(("Teleported to %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
-				task.delay(0.3, function() if hum.Sit then FND.unsit() end end)
+				task.delay(0.3, function()
+			if hum.Sit then
+				hum.Jump = true
+				hum:ChangeState(Enum.HumanoidStateType.Jumping)
+			end
+			end)
 			else
 				setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
 			end
