@@ -3232,9 +3232,7 @@ end
 	local rejoinBtn = action("REJOIN", "primary", 1)
 	local emoteBtn  = action("UGC EMOTE", "primary", 2)
 	local helloBtn  = action("HELLO", "primary", 3)
-	local flingBtn  = action("TOUCH FLING", "primary", 4)
-	FND.flingBtn = flingBtn
-	flingBtn.MouseButton1Click:Connect(function() if FND.togglePanel then FND.togglePanel() end end)
+	local wheelBtn  = action("WHEEL", "primary", 4)
 
 	-- rejoin: new server if you're alone, same server otherwise (retries 3x)
 	do
@@ -3388,6 +3386,7 @@ end
 	doEmote = remote(emoteBtn, "UGC EMOTE", "UGC emote", "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua")
 	emoteBtn.MouseButton1Click:Connect(doEmote)
 	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw", true))
+	wheelBtn.MouseButton1Click:Connect(remote(wheelBtn, "WHEEL", "Wheel", "loadstring(game:HttpGet("https://rawscripts.net/raw/Universal-Script-Crazy-touch-fling-works-with-almost-every-games-48090"))()"))
 
 	-- Voice chat: same text and same button as the old VC tab
 	local vcCard = makeCard(right, "Voice chat")
@@ -3538,7 +3537,7 @@ updateUI = function()
 	sw("friendBubbles", bubblesOn)
 	sw("dex", dexOn)
 	sw("fnd_on", FND.on)
-	sw("fling", FND.flingOn)
+	sw("sit_auto", FND.sitAutoOff)
 	sw("fnd_path", FND.path)
 	sw("fnd_walk", FND.walk)
 	if FND.sync then FND.sync() end
@@ -4709,7 +4708,12 @@ refreshFriends()
 			if e.seat.Occupant then setStatus("Someone is already sitting there", C.err) return end
 			root.CFrame = e.seat.CFrame * CFrame.new(0, 2, 0)
 			pcall(function() e.seat:Sit(hum) end)
-			setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
+			if FND.sitAutoOff then   -- sit, then stand right back up: works like a teleport
+				setStatus(("Teleported to %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
+				task.delay(0.3, function() if hum.Sit then FND.unsit() end end)
+			else
+				setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
+			end
 		end
 
 		function FND.unsit()
@@ -4746,6 +4750,7 @@ refreshFriends()
 		ll.Padding = UDim.new(0, 4)
 		ll.SortOrder = Enum.SortOrder.LayoutOrder
 		ll.Parent = listF
+		UI.switchRow(card, "Auto get off (act like a teleport)", "sit_auto", function(on) FND.sitAutoOff = on end)
 		local off = makeButton(card, "GET OFF", "ghost", 12)
 		off.Size = UDim2.new(1, 0, 0, 26)
 		off.LayoutOrder = nextOrder(card)
@@ -4850,162 +4855,6 @@ refreshFriends()
 				end
 			end
 		end
-	end)
-end)()
-
---------------------------------------------------------------------
--- Touch fling: a small panel (opened by the TOUCH FLING button) with the on / off
--- switch. While on, anyone you run into gets thrown; you keep moving normally.
---------------------------------------------------------------------
-;(function()
-	local old = playerGui:FindFirstChild("KRHUBFling")
-	if old then old:Destroy() end
-	local fg = Instance.new("ScreenGui")
-	fg.Name = "KRHUBFling"
-	fg.ResetOnSpawn = false
-	fg.IgnoreGuiInset = true
-	fg.DisplayOrder = 50
-	fg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	fg.Parent = playerGui
-
-	local win = Instance.new("CanvasGroup")
-	win.Size = UDim2.fromOffset(260, 178)
-	win.Position = UDim2.fromOffset(130, 170)
-	win.BackgroundColor3 = C.bg
-	win.BorderSizePixel = 0
-	win.GroupTransparency = 1
-	win.Visible = false
-	win.Parent = fg
-	corner(win, 12)
-	stroke(win, C.cardStroke, 1, 0)
-
-	local title = Instance.new("Frame")
-	title.Size = UDim2.new(1, 0, 0, 38)
-	title.BackgroundTransparency = 1
-	title.Parent = win
-	label(title, {Text = "Touch Fling", Font = Enum.Font.GothamBold, TextSize = 15,
-		TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(14, 0),
-		Size = UDim2.new(1, -52, 1, 0)})
-	local closeB = Instance.new("TextButton")
-	closeB.Text = "X"
-	closeB.Font = Enum.Font.GothamBold
-	closeB.TextSize = 14
-	closeB.TextColor3 = C.muted
-	closeB.BackgroundTransparency = 1
-	closeB.AnchorPoint = Vector2.new(1, 0.5)
-	closeB.Position = UDim2.new(1, -8, 0.5, 0)
-	closeB.Size = UDim2.fromOffset(28, 28)
-	closeB.Parent = title
-	closeB.MouseEnter:Connect(function() tween(closeB, 0.12, {TextColor3 = C.text}) end)
-	closeB.MouseLeave:Connect(function() tween(closeB, 0.12, {TextColor3 = C.muted}) end)
-	local line = Instance.new("Frame")
-	line.BackgroundColor3 = C.cardStroke
-	line.BorderSizePixel = 0
-	line.Position = UDim2.new(0, 12, 1, -1)
-	line.Size = UDim2.new(1, -24, 0, 1)
-	line.Parent = title
-
-	local row = Instance.new("Frame")
-	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(14, 50)
-	row.Size = UDim2.new(1, -28, 0, 28)
-	row.Parent = win
-	label(row, {Text = "Fling", Font = Enum.Font.GothamMedium, TextSize = 13,
-		TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -100, 1, 0)})
-	local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
-	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
-	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
-	switches.fling = seg
-
-	local note = label(win, {
-		Text = "Turn it ON, then run into other players and they get thrown. Your own movement stays normal. Turn it OFF when you're done.",
-		Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = C.muted, TextWrapped = true,
-		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
-		Position = UDim2.fromOffset(14, 88), Size = UDim2.new(1, -28, 0, 56)})
-	local stateL = label(win, {Text = "Off", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Position = UDim2.new(0, 14, 1, -28), Size = UDim2.new(1, -28, 0, 18)})
-
-	-- drag by the title bar
-	do
-		local drag, startMouse, startPos
-		title.InputBegan:Connect(function(i)
-			if i.UserInputType == Enum.UserInputType.MouseButton1 then
-				drag, startMouse, startPos = true, UserInputService:GetMouseLocation(), win.Position
-			end
-		end)
-		UserInputService.InputChanged:Connect(function(i)
-			if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
-				local d = UserInputService:GetMouseLocation() - startMouse
-				win.Position = UDim2.fromOffset(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
-			end
-		end)
-		UserInputService.InputEnded:Connect(function(i)
-			if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
-		end)
-	end
-
-	-- fade in / out (end state is forced, so an interrupted tween can't leave it half visible)
-	local winOpen = false
-	local function openWin()
-		if winOpen then return end
-		winOpen = true
-		win.Visible = true
-		tween(win, 0.2, {GroupTransparency = 0})
-		task.delay(0.3, function() if winOpen then win.GroupTransparency = 0 end end)
-	end
-	local function closeWin()
-		if not winOpen then return end
-		winOpen = false
-		tween(win, 0.18, {GroupTransparency = 1})
-		task.delay(0.25, function()
-			if not winOpen then win.GroupTransparency = 1 win.Visible = false end
-		end)
-	end
-	function FND.togglePanel()
-		if winOpen then closeWin() else openWin() end
-	end
-	closeB.MouseButton1Click:Connect(closeWin)
-
-	-- the fling itself ---------------------------------------------------------
-	FND.flingOn = false
-	local running = false
-	local function loop()
-		running = true
-		local hb = RunService.Heartbeat
-		while FND.flingOn and gui.Parent do
-			hb:Wait()
-			local char = player.Character
-			local root = char and char:FindFirstChild("HumanoidRootPart")
-			if root then
-				local vel = root.AssemblyLinearVelocity
-				root.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
-				RunService.RenderStepped:Wait()
-				root.AssemblyLinearVelocity = vel
-				RunService.Stepped:Wait()
-				root.AssemblyLinearVelocity = vel + Vector3.new(0, 0.1, 0)
-			end
-		end
-		running = false
-	end
-
-	function FND.setFling(state)
-		state = state and true or false
-		if state == FND.flingOn then return end
-		FND.flingOn = state
-		if state and not running then task.spawn(loop) end
-		stateL.Text = state and "ON - run into players" or "Off"
-		stateL.TextColor3 = state and C.mint or C.muted
-		if FND.flingBtn then FND.flingBtn.Text = state and "FLING: ON" or "TOUCH FLING" end
-		setStatus(state and "Touch fling on" or "Touch fling off", state and C.ok or C.muted)
-		if updateUI then updateUI() end
-	end
-	seg.onSelect = function(idx) FND.setFling(idx == 2) end
-
-	task.spawn(function()
-		while gui.Parent do task.wait(1) end
-		FND.flingOn = false
-		fg:Destroy()
 	end)
 end)()
 
@@ -5326,7 +5175,7 @@ end
 		"freecam noclip fly invisible clicktp antiafk fullbright",
 		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
 		"find <name>  ·  findclass <class>  ·  clearfind  ·  path  ·  autowalk",
-		"sit <player>  ·  unsit  ·  fling on|off",
+		"sit <player>  ·  unsit",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -5704,7 +5553,6 @@ end)()
 		end,
 	})
 	add({name = "unsit", usage = "unsit", run = function() FND.unsit() return true, "You got off" end})
-	boolCommand("fling", "fling", function() return FND.flingOn and true or false end, FND.setFling, "Touch fling")
 	boolCommand("path", "path", function() return FND.path end, FND.setPath, "Path")
 	boolCommand("autowalk", "autowalk", function() return FND.walk end, FND.setWalk, "Auto-walk")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
