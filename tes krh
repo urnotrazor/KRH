@@ -3662,7 +3662,7 @@ end
 	end
 
 	local function badge(inst)
-		if inst.Parent == game then return Color3.fromRGB(110, 110, 120), "◆" end
+		if inst.Parent == game then return Color3.fromRGB(110, 110, 120), "#" end
 		if inst:IsA("BasePart") then return Color3.fromRGB(70, 130, 210), "P" end
 		if inst:IsA("Model") then return Color3.fromRGB(60, 160, 100), "M" end
 		if inst:IsA("Folder") then return Color3.fromRGB(205, 170, 60), "F" end
@@ -3806,7 +3806,8 @@ end
 				local x = depth * 14 + 2
 				st.arrow.Position = UDim2.fromOffset(x, 0)
 				local has = open[inst] or (search.Text == "" and inst:FindFirstChildWhichIsA("Instance") ~= nil)
-				st.arrow.Text = (search.Text ~= "" or not has) and "" or (open[inst] and "▾" or "▸")
+				st.arrow.Text = (search.Text ~= "" or not has) and "" or ">"
+				st.arrow.Rotation = open[inst] and 90 or 0   -- ">" turns into a down arrow
 				st.arrow.Active = st.arrow.Text ~= ""
 				local color, letter = badge(inst)
 				st.badge.BackgroundColor3 = color
