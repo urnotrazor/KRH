@@ -3492,13 +3492,13 @@ end
 	local CAS = game:GetService("ContextActionService")
 	local GuiService = game:GetService("GuiService")
 
-	-- black / grey, slightly see-through
+	-- KRHUB's own colors
 	local D = {
-		accent = Color3.fromRGB(205, 205, 212),   -- world outlines
-		bar    = Color3.fromRGB(20, 20, 22),      -- name tag
-		text   = Color3.fromRGB(232, 232, 236),
-		sub    = Color3.fromRGB(135, 135, 145),
-		btn    = Color3.fromRGB(44, 44, 48),
+		accent = C.mint,
+		bar    = C.bar,
+		text   = C.text,
+		sub    = C.muted,
+		btn    = C.field,
 		white  = Color3.new(1, 1, 1),
 	}
 
@@ -3532,15 +3532,15 @@ end
 	tag.Position = UDim2.new(0.5, 0, 1, -22)
 	tag.Size = UDim2.fromOffset(380, 0)
 	tag.AutomaticSize = Enum.AutomaticSize.Y
-	tag.BackgroundColor3 = Color3.fromRGB(16, 16, 18)
-	tag.BackgroundTransparency = 0.08
+	tag.BackgroundColor3 = C.bg
+	tag.BackgroundTransparency = 0
 	tag.BorderSizePixel = 0
 	tag.GroupTransparency = 1
 	tag.Visible = false
 	tag.ZIndex = 5
 	tag.Parent = dg
 	corner(tag, 12)
-	stroke(tag, Color3.new(1, 1, 1), 1, 0.85)
+	stroke(tag, C.cardStroke, 1, 0)
 	local tagPad = Instance.new("UIPadding")
 	tagPad.PaddingLeft, tagPad.PaddingRight = UDim.new(0, 14), UDim.new(0, 14)
 	tagPad.PaddingTop, tagPad.PaddingBottom = UDim.new(0, 10), UDim.new(0, 10)
@@ -3556,7 +3556,7 @@ end
 	end
 	local tagName  = tagLine(1, 15, D.text, Enum.Font.GothamBold)
 	local tagClass = tagLine(2, 12, D.sub, Enum.Font.GothamMedium)
-	local tagPath  = tagLine(3, 12, Color3.fromRGB(105, 105, 115), Enum.Font.Gotham)
+	local tagPath  = tagLine(3, 12, C.faint, Enum.Font.Gotham)
 
 	local function dotPath(inst)
 		local parts, cur = {}, inst
@@ -3576,13 +3576,14 @@ end
 			tagShown = true
 			tag.Visible = true
 			tween(tag, 0.15, {GroupTransparency = 0})
+			task.delay(0.25, function() if tagShown then tag.GroupTransparency = 0 end end)
 		end
 	end
 	local function hideTag()
 		if not tagShown then return end
 		tagShown, tagFor = false, nil
-		local t = tween(tag, 0.15, {GroupTransparency = 1})
-		t.Completed:Connect(function() if not tagShown then tag.Visible = false end end)
+		tween(tag, 0.15, {GroupTransparency = 1})
+		task.delay(0.2, function() if not tagShown then tag.GroupTransparency = 1 tag.Visible = false end end)
 	end
 
 	-- window: a small tree of the picked part, its parent and its children ----
@@ -3590,14 +3591,14 @@ end
 	local win = Instance.new("CanvasGroup")
 	win.Size = UDim2.fromOffset(330, 470)
 	win.Position = UDim2.fromOffset(90, 110)
-	win.BackgroundColor3 = Color3.fromRGB(16, 16, 18)
-	win.BackgroundTransparency = 0.08
+	win.BackgroundColor3 = C.bg
+	win.BackgroundTransparency = 0
 	win.BorderSizePixel = 0
 	win.GroupTransparency = 1
 	win.Visible = false
 	win.Parent = dg
 	corner(win, 12)
-	stroke(win, Color3.new(1, 1, 1), 1, 0.85)
+	stroke(win, C.cardStroke, 1, 0)
 
 	local title = Instance.new("Frame")
 	title.Size = UDim2.new(1, 0, 0, 78)
@@ -3610,7 +3611,7 @@ end
 		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
 		Position = UDim2.fromOffset(14, 33), Size = UDim2.new(1, -28, 0, 16)})
 	local pathL = label(title, {Text = "", Font = Enum.Font.Gotham, TextSize = 12,
-		TextColor3 = Color3.fromRGB(105, 105, 115), TextXAlignment = Enum.TextXAlignment.Left,
+		TextColor3 = C.faint, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Position = UDim2.fromOffset(14, 50), Size = UDim2.new(1, -28, 0, 16)})
 	local closeB = Instance.new("TextButton")
@@ -3626,16 +3627,16 @@ end
 	closeB.MouseEnter:Connect(function() tween(closeB, 0.12, {TextColor3 = D.text}) end)
 	closeB.MouseLeave:Connect(function() tween(closeB, 0.12, {TextColor3 = D.sub}) end)
 	local line = Instance.new("Frame")
-	line.BackgroundColor3 = Color3.new(1, 1, 1)
-	line.BackgroundTransparency = 0.9
+	line.BackgroundColor3 = C.cardStroke
+	line.BackgroundTransparency = 0
 	line.BorderSizePixel = 0
 	line.Position = UDim2.new(0, 12, 1, -1)
 	line.Size = UDim2.new(1, -24, 0, 1)
 	line.Parent = title
 
 	local list = Instance.new("ScrollingFrame")
-	list.BackgroundColor3 = Color3.new(0, 0, 0)
-	list.BackgroundTransparency = 0.55
+	list.BackgroundColor3 = C.field
+	list.BackgroundTransparency = 0
 	list.BorderSizePixel = 0
 	list.Position = UDim2.fromOffset(12, 88)
 	list.Size = UDim2.new(1, -24, 1, -256)
@@ -3644,27 +3645,21 @@ end
 	list.ScrollBarImageColor3 = D.sub
 	list.Parent = win
 	corner(list, 8)
-	stroke(list, Color3.new(1, 1, 1), 1, 0.9)
+	stroke(list, C.cardStroke, 1, 0)
 
-	local propsL = label(win, {Text = "", Font = Enum.Font.Code, TextSize = 13, TextColor3 = D.text,
+	local propsL = label(win, {Text = "", Font = Enum.Font.Code, TextSize = 13, TextColor3 = C.text,
 		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Position = UDim2.new(0, 14, 1, -158), Size = UDim2.new(1, -28, 0, 106)})
 
-	local copyB = makeButton(win, "COPY PATH", "ghost", 12)
+	local copyB = makeButton(win, "COPY PATH", "primary", 12)
 	local tpB    = makeButton(win, "TELEPORT", "ghost", 12)
 	local delB   = makeButton(win, "DELETE", "ghost", 12)
+	delB.TextColor3 = C.err
 	for k, b in ipairs({copyB, tpB, delB}) do
 		b.AnchorPoint = Vector2.new(0, 1)
 		b.Size = UDim2.new(1/3, -9, 0, 30)
 		b.Position = UDim2.new((k - 1) / 3, k == 1 and 12 or (k == 2 and 6 or 0), 1, -12)
-		b.TextSize = 12
-		b.TextColor3 = k == 3 and Color3.fromRGB(226, 140, 140) or D.text
-		b.BackgroundColor3 = D.btn
-		b:SetAttribute("base", D.btn)
-		local bs = b:FindFirstChild("Stroke")
-		if bs then bs.Color = Color3.new(1, 1, 1) bs.Transparency = 0.88 end
-		corner(b, 8)
 	end
 
 	-- drag by the title bar
@@ -3790,7 +3785,7 @@ end
 		b.Text = ""
 		b.AutoButtonColor = false
 		b.BorderSizePixel = 0
-		b.BackgroundColor3 = Color3.new(1, 1, 1)
+		b.BackgroundColor3 = C.card
 		b.BackgroundTransparency = 1
 		b.Size = UDim2.new(1, 0, 0, ROW)
 		b.Parent = list
@@ -3813,8 +3808,12 @@ end
 		b.MouseButton1Click:Connect(function()
 			if st.inst and st.inst ~= selected then select(st.inst) end
 		end)
-		b.MouseEnter:Connect(function() if st.inst ~= selected then b.BackgroundTransparency = 0.9 end end)
-		b.MouseLeave:Connect(function() if st.inst ~= selected then b.BackgroundTransparency = st.base or 1 end end)
+		b.MouseEnter:Connect(function()
+			if st.inst ~= selected then b.BackgroundColor3 = C.segSel b.BackgroundTransparency = 0 end
+		end)
+		b.MouseLeave:Connect(function()
+			if st.inst ~= selected then b.BackgroundColor3 = C.card b.BackgroundTransparency = st.base or 1 end
+		end)
 		pool[i] = st
 		return st
 	end
@@ -3843,11 +3842,15 @@ end
 				st.name.Text = inst.Name
 				st.cls.Text = inst.ClassName
 				if inst == selected then
-					st.base = 0.82
+					st.base = 0
+					st.btn.BackgroundColor3 = C.goldBg
 					st.name.Font = Enum.Font.GothamBold
+					st.name.TextColor3 = C.goldText
 				else
-					st.base = (first + i - 1) % 2 == 0 and 0.96 or 1
+					st.base = (first + i - 1) % 2 == 0 and 0 or 1
+					st.btn.BackgroundColor3 = C.card
 					st.name.Font = Enum.Font.GothamMedium
+					st.name.TextColor3 = C.text
 				end
 				st.btn.BackgroundTransparency = st.base
 			else
@@ -3860,16 +3863,23 @@ end
 	list:GetPropertyChangedSignal("CanvasPosition"):Connect(function() render(false) end)
 	list:GetPropertyChangedSignal("AbsoluteSize"):Connect(function() render(false) end)
 
+	-- fade in / out. The end state is forced afterwards, so an interrupted tween
+	-- can never leave the window stuck half see-through.
+	local winOpen = false
 	local function openWin()
-		if win.Visible and win.GroupTransparency < 0.5 then return end
+		if winOpen then return end
+		winOpen = true
 		win.Visible = true
-		win.GroupTransparency = 1
-		tween(win, 0.25, {GroupTransparency = 0})
+		tween(win, 0.2, {GroupTransparency = 0})
+		task.delay(0.3, function() if winOpen then win.GroupTransparency = 0 end end)
 	end
 	local function closeWin()
-		if not win.Visible then return end
-		local t = tween(win, 0.2, {GroupTransparency = 1})
-		t.Completed:Connect(function() if win.GroupTransparency >= 0.99 then win.Visible = false end end)
+		if not winOpen then return end
+		winOpen = false
+		tween(win, 0.18, {GroupTransparency = 1})
+		task.delay(0.25, function()
+			if not winOpen then win.GroupTransparency = 1 win.Visible = false end
+		end)
 	end
 
 	local selConn
