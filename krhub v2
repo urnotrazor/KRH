@@ -3271,30 +3271,120 @@ end
 		rejoinBtn.MouseButton1Click:Connect(doRejoin)
 	end
 
-	-- buttons that load an outside script
-	local function remote(btn, idle, name, url)
-		local loading = false
+	-- buttons that load an outside script.  killOnReset: when your character resets /
+	-- respawns, everything that script started through task.spawn / task.delay /
+	-- task.defer (and the thread running it) is cancelled.
+	local function remote(btn, idle, name, url, killOnReset)
+		local loading, current = false, 0
 		return function()
 			if loading then return end
 			loading = true
+			current += 1
+			local mine = current
 			btn.Text = "LOADING..."
 			setStatus("Loading " .. name .. "...", C.ok)
-			task.spawn(function()
-				local ok, err = pcall(function() loadstring(game:HttpGet(url))() end)
+
+			local threads, killConn, main = {}, nil, nil
+			local addedConns, baseFns, beforeTools = {}, {}, {}
+
+			-- tools (backpack / character / starter gear) and the respawn hooks the script made
+			local function toolHolders()
+				local out = {}
+				for _, h in ipairs({"Backpack", "StarterGear"}) do
+					local x = player:FindFirstChild(h)
+					if x then out[#out + 1] = x end
+				end
+				if player.Character then out[#out + 1] = player.Character end
+				return out
+			end
+			local function listConns()
+				local out = {}
+				if getconnections then
+					for _, sig in ipairs({player.CharacterAdded, player.CharacterRemoving}) do
+						local ok, list = pcall(getconnections, sig)
+						if ok and type(list) == "table" then
+							for _, c in ipairs(list) do out[#out + 1] = c end
+						end
+					end
+				end
+				return out
+			end
+
+			local function kill()
+				if killConn then killConn:Disconnect() killConn = nil end
+				-- stop whatever animation the script is playing
+				local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+				local animator = hum and hum:FindFirstChildOfClass("Animator")
+				if animator then
+					for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do pcall(function() tr:Stop(0) end) end
+				end
+				-- remove the tool(s) it gave you
+				for _, holder in ipairs(toolHolders()) do
+					for _, c in ipairs(holder:GetChildren()) do
+						if c:IsA("Tool") and not beforeTools[c] then pcall(function() c:Destroy() end) end
+					end
+				end
+				-- remove its "do it again on respawn" hooks
+				for _, c in ipairs(addedConns) do pcall(function() c:Disconnect() end) end
+				addedConns = {}
+				for _, th in ipairs(threads) do pcall(task.cancel, th) end
+				if main then pcall(task.cancel, main) end
+				threads = {}
+				if mine == current then
+					btn.Text = idle
+					loading = false
+					setStatus(name .. " stopped (character reset)", C.muted)
+				end
+			end
+
+			main = task.spawn(function()
+				local ok, err = pcall(function()
+					local fn = loadstring(game:HttpGet(url))
+					if killOnReset and setfenv and getfenv then
+						-- same script, but its task.spawn / delay / defer calls are tracked
+						local tracked = setmetatable({}, {__index = task})
+						for _, nm in ipairs({"spawn", "defer", "delay"}) do
+							tracked[nm] = function(...)
+								local th = task[nm](...)
+								if typeof(th) == "thread" then threads[#threads + 1] = th end
+								return th
+							end
+						end
+						pcall(setfenv, fn, setmetatable({task = tracked}, {__index = getfenv(fn)}))
+					end
+					if killOnReset then
+						for _, holder in ipairs(toolHolders()) do
+							for _, c in ipairs(holder:GetChildren()) do
+								if c:IsA("Tool") then beforeTools[c] = true end
+							end
+						end
+						for _, c in ipairs(listConns()) do
+							local f = c.Function
+							if f then baseFns[f] = true end
+						end
+						killConn = player.CharacterRemoving:Connect(kill)
+						task.delay(1.5, function()   -- connections the script made while starting up
+							for _, c in ipairs(listConns()) do
+								local f = c.Function
+								if f and not baseFns[f] and f ~= kill then addedConns[#addedConns + 1] = c end
+							end
+						end)
+					end
+					fn()
+				end)
 				if ok then
 					setStatus(name .. " loaded", C.ok)
 				else
 					warn(name .. " failed: " .. tostring(err))
 					setStatus(name .. " failed to load", C.err)
 				end
-				btn.Text = idle
-				loading = false
+				if mine == current and loading then btn.Text = idle loading = false end
 			end)
 		end
 	end
 	doEmote = remote(emoteBtn, "UGC EMOTE", "UGC emote", "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua")
 	emoteBtn.MouseButton1Click:Connect(doEmote)
-	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw"))
+	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw", true))
 
 	-- Voice chat: same text and same button as the old VC tab
 	local vcCard = makeCard(right, "Voice chat")
