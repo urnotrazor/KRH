@@ -3977,8 +3977,16 @@ end
 
 	local function onClick(_, state)
 		if state == Enum.UserInputState.Begin then
-			local part = pick()
-			if part then select(part) end
+			local part, m = pick()
+			if part then
+				-- open the window right next to the cursor (flipped / clamped to stay on screen)
+				local vp, w, h = dg.AbsoluteSize, win.AbsoluteSize.X, win.AbsoluteSize.Y
+				local x = m.X + 18
+				if x + w > vp.X - 8 then x = m.X - 18 - w end
+				local y = math.clamp(m.Y + 18, 8, math.max(8, vp.Y - h - 8))
+				win.Position = UDim2.fromOffset(math.max(8, x), y)
+				select(part)
+			end
 		end
 		return Enum.ContextActionResult.Sink   -- the game never sees this click
 	end
