@@ -2323,6 +2323,7 @@ local otherList, otherEmpty, otherHeader
 local sameRefreshBtn, updatedLabel
 local rebuildOnlineLists          -- defined after the GUI (needs join logic)
 local bubblesOn, setBubbles       -- friend avatars above their heads (Friends tab switch)
+local dexOn, setDex               -- mini Dex (part picker)
 local fetchOnlineFriends          -- same
 local ready = false   -- becomes true when the loading bar is done
 local doRejoin, doEmote                 -- filled in by the Player tab
@@ -2349,6 +2350,7 @@ local KB = {
 		{id = "espNames",   name = "ESP names",          default = false},
 		{id = "antiAfk",    name = "Anti-AFK",           default = false},
 		{id = "invisible",  name = "Invisible",          default = false},
+		{id = "dex",        name = "Mini Dex",           default = false},
 	},
 }
 for _, def in ipairs(KB.defs) do KB.binds[def.id] = def.default end
@@ -3216,6 +3218,7 @@ end
 	local world = makeCard(right, "World")
 	UI.switchRow(world, "Fullbright", "light_fb", function(on) setFullbright(on) end)
 	UI.switchRow(world, "Anti-AFK", "antiAfk", function(on) if on ~= antiAfkOn then setAntiAfk(on) end end)
+	UI.switchRow(world, "Mini Dex (click parts)", "dex", function(on) setDex(on) end)
 
 	local act = makeCard(right, "Actions")
 	local grid = UI.grid(act, 30, 3)
@@ -3438,6 +3441,7 @@ updateUI = function()
 	sw("clickTp", clickTpOn)
 	sw("invisible", invisibleOn)
 	sw("friendBubbles", bubblesOn)
+	sw("dex", dexOn)
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
 	sw("boxEsp", boxCfg.enabled)
@@ -3481,6 +3485,354 @@ updateUI = function()
 	bannerSummary.Text = summary
 	bannerSummary.Visible = summary ~= ""
 end
+
+-- Mini Dex: turn it on, hover a part to outline it, click it to open a small
+-- window with its path, its parent and its children (click any to jump to it).
+;(function()
+	local CAS = game:GetService("ContextActionService")
+	local GuiService = game:GetService("GuiService")
+
+	local old = playerGui:FindFirstChild("KRHUBDex")
+	if old then old:Destroy() end
+	local dg = Instance.new("ScreenGui")
+	dg.Name = "KRHUBDex"
+	dg.ResetOnSpawn = false
+	dg.IgnoreGuiInset = true
+	dg.DisplayOrder = 50
+	dg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	dg.Parent = playerGui
+
+	local function makeHL(fill, outline, ft)
+		local h = Instance.new("Highlight")
+		h.FillColor = fill
+		h.OutlineColor = outline
+		h.FillTransparency = ft
+		h.OutlineTransparency = 0
+		h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		h.Enabled = false
+		h.Parent = dg
+		return h
+	end
+	local hoverHL = makeHL(C.mint, C.goldText, 1)
+	local selHL   = makeHL(C.mint, C.mint, 0.75)
+
+	-- name tag that follows the cursor
+	local tag = Instance.new("TextLabel")
+	tag.AutomaticSize = Enum.AutomaticSize.XY
+	tag.BackgroundColor3 = C.bar
+	tag.BorderSizePixel = 0
+	tag.Font = Enum.Font.GothamMedium
+	tag.TextSize = 13
+	tag.TextColor3 = C.text
+	tag.Visible = false
+	tag.ZIndex = 5
+	tag.Parent = dg
+	corner(tag, 6)
+	stroke(tag, C.goldLine, 1, 0)
+	local tagPad = Instance.new("UIPadding")
+	tagPad.PaddingLeft, tagPad.PaddingRight = UDim.new(0, 8), UDim.new(0, 8)
+	tagPad.PaddingTop, tagPad.PaddingBottom = UDim.new(0, 4), UDim.new(0, 4)
+	tagPad.Parent = tag
+
+	-- window ---------------------------------------------------------
+	local win = Instance.new("CanvasGroup")
+	win.Size = UDim2.fromOffset(310, 380)
+	win.Position = UDim2.fromOffset(90, 130)
+	win.BackgroundColor3 = C.bg
+	win.BorderSizePixel = 0
+	win.GroupTransparency = 1
+	win.Visible = false
+	win.Parent = dg
+	corner(win, 10)
+	stroke(win, C.cardStroke, 1, 0)
+
+	local title = Instance.new("Frame")
+	title.Size = UDim2.new(1, 0, 0, 34)
+	title.BackgroundColor3 = C.bar
+	title.BorderSizePixel = 0
+	title.Parent = win
+	label(title, {Text = "Mini Dex", Font = Enum.Font.GothamBold, TextSize = 14,
+		TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(1, -50, 1, 0)})
+	local closeB = Instance.new("TextButton")
+	closeB.Text = "×"
+	closeB.Font = Enum.Font.GothamBold
+	closeB.TextSize = 20
+	closeB.TextColor3 = C.muted
+	closeB.BackgroundTransparency = 1
+	closeB.AnchorPoint = Vector2.new(1, 0.5)
+	closeB.Position = UDim2.new(1, -6, 0.5, 0)
+	closeB.Size = UDim2.fromOffset(28, 28)
+	closeB.Parent = title
+
+	local nameL = label(win, {Text = "", Font = Enum.Font.GothamBold, TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(12, 42), Size = UDim2.new(1, -24, 0, 20)})
+	local classL = label(win, {Text = "", TextSize = 12, TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 16)})
+	local pathL = label(win, {Text = "", TextSize = 11, TextColor3 = C.faint,
+		TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+		Position = UDim2.fromOffset(12, 80), Size = UDim2.new(1, -24, 0, 16)})
+
+	local copyB = makeButton(win, "COPY PATH", "primary", 12)
+	copyB.Position = UDim2.fromOffset(12, 102)
+	copyB.Size = UDim2.new(1, -24, 0, 28)
+
+	label(win, {Text = "PARENT", TextSize = 11, TextColor3 = C.muted, Font = Enum.Font.GothamBold,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(12, 138), Size = UDim2.new(1, -24, 0, 14)})
+	local parentHolder = Instance.new("Frame")
+	parentHolder.BackgroundTransparency = 1
+	parentHolder.Position = UDim2.fromOffset(12, 154)
+	parentHolder.Size = UDim2.new(1, -24, 0, 28)
+	parentHolder.Parent = win
+
+	local childHead = label(win, {Text = "CHILDREN", TextSize = 11, TextColor3 = C.muted,
+		Font = Enum.Font.GothamBold, TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.fromOffset(12, 190), Size = UDim2.new(1, -24, 0, 14)})
+	local list = Instance.new("ScrollingFrame")
+	list.BackgroundTransparency = 1
+	list.BorderSizePixel = 0
+	list.Position = UDim2.fromOffset(12, 208)
+	list.Size = UDim2.new(1, -24, 1, -220)
+	list.CanvasSize = UDim2.new()
+	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	list.ScrollBarThickness = 3
+	list.ScrollBarImageColor3 = C.faint
+	list.Parent = win
+	local ll = Instance.new("UIListLayout")
+	ll.Padding = UDim.new(0, 4)
+	ll.SortOrder = Enum.SortOrder.LayoutOrder
+	ll.Parent = list
+
+	-- drag by the title bar
+	do
+		local drag, startMouse, startPos
+		title.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then
+				drag, startMouse, startPos = true, UserInputService:GetMouseLocation(), win.Position
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+				local d = UserInputService:GetMouseLocation() - startMouse
+				win.Position = UDim2.fromOffset(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+		end)
+	end
+
+	-- path text, e.g.  game:GetService("Workspace").Map["Big Door"]
+	local function pathOf(inst)
+		if inst == game then return "game" end
+		local chain, cur = {}, inst
+		while cur and cur ~= game do table.insert(chain, 1, cur) cur = cur.Parent end
+		if not cur then return "-- not in the game: " .. inst.Name end
+		local out = "game"
+		for i, o in ipairs(chain) do
+			if i == 1 then
+				out = out .. ':GetService("' .. o.ClassName .. '")'
+			elseif o.Name:match("^[%a_][%w_]*$") then
+				out = out .. "." .. o.Name
+			else
+				out = out .. '["' .. o.Name:gsub('(["\\])', "\\%1") .. '"]'
+			end
+		end
+		return out
+	end
+
+	local selected, selConns, refreshWin = nil, {}, nil
+
+	local function setAdornee(h, inst)
+		local ok = inst and (inst:IsA("BasePart") or inst:IsA("Model")) and inst:IsDescendantOf(workspace)
+		h.Adornee = ok and inst or nil
+		h.Enabled = ok and true or false
+	end
+
+	local function openWin()
+		if win.Visible and win.GroupTransparency < 0.5 then return end
+		win.Visible = true
+		tween(win, 0.25, {GroupTransparency = 0})
+	end
+	local function closeWin()
+		if not win.Visible then return end
+		local t = tween(win, 0.2, {GroupTransparency = 1})
+		t.Completed:Connect(function() if win.GroupTransparency >= 0.99 then win.Visible = false end end)
+	end
+
+	local function select(inst)
+		for _, c in ipairs(selConns) do c:Disconnect() end
+		selConns = {}
+		selected = inst
+		setAdornee(selHL, inst)
+		if inst then
+			local pending = false
+			local function soon()
+				if pending then return end
+				pending = true
+				task.delay(0.15, function() pending = false if selected == inst then refreshWin() end end)
+			end
+			table.insert(selConns, inst.ChildAdded:Connect(soon))
+			table.insert(selConns, inst.ChildRemoved:Connect(soon))
+			table.insert(selConns, inst.AncestryChanged:Connect(function()
+				if not inst:IsDescendantOf(game) then select(inst.Parent and inst.Parent:IsDescendantOf(game) and inst.Parent or nil) end
+			end))
+			refreshWin()
+			openWin()
+		else
+			closeWin()
+		end
+	end
+
+	local function rowFor(parent, inst, prefix)
+		local b = Instance.new("TextButton")
+		b.Text = ""
+		b.AutoButtonColor = false
+		b.BorderSizePixel = 0
+		b.BackgroundColor3 = C.field
+		b.Size = UDim2.new(1, 0, 0, 28)
+		b.Parent = parent
+		corner(b, 6)
+		stroke(b, C.cardStroke, 1, 0)
+		b:SetAttribute("base", C.field)
+		makeInteractive(b)
+		label(b, {Text = (prefix or "") .. inst.Name, TextSize = 13,
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(8, 0), Size = UDim2.new(0.6, -8, 1, 0)})
+		label(b, {Text = inst.ClassName, TextSize = 11, TextColor3 = C.muted,
+			TextXAlignment = Enum.TextXAlignment.Right, TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.new(0.6, 0, 0, 0), Size = UDim2.new(0.4, -8, 1, 0)})
+		b.MouseButton1Click:Connect(function() select(inst) end)
+		return b
+	end
+
+	refreshWin = function()
+		local s = selected
+		if not s then return end
+		nameL.Text = s == game and "game" or s.Name
+		classL.Text = s.ClassName
+		pathL.Text = pathOf(s)
+		for _, c in ipairs(parentHolder:GetChildren()) do c:Destroy() end
+		if s.Parent then
+			rowFor(parentHolder, s.Parent, "↑  ")
+		else
+			label(parentHolder, {Text = "(no parent)", TextSize = 12, TextColor3 = C.faint,
+				TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.fromScale(1, 1)})
+		end
+		for _, c in ipairs(list:GetChildren()) do
+			if c:IsA("GuiObject") then c:Destroy() end
+		end
+		local kids = s:GetChildren()
+		table.sort(kids, function(a, b) return a.Name:lower() < b.Name:lower() end)
+		childHead.Text = ("CHILDREN (%d)"):format(#kids)
+		local MAXK = 150
+		for i, k in ipairs(kids) do
+			if i > MAXK then
+				label(list, {Text = ("+ %d more not shown"):format(#kids - MAXK), TextSize = 12,
+					TextColor3 = C.muted, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = i})
+				break
+			end
+			rowFor(list, k).LayoutOrder = i
+		end
+		if #kids == 0 then
+			label(list, {Text = "No children", TextSize = 12, TextColor3 = C.faint,
+				TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, 22)})
+		end
+	end
+
+	copyB.MouseButton1Click:Connect(function()
+		if not selected then return end
+		local fn = setclipboard or toclipboard
+		if fn and pcall(fn, pathOf(selected)) then
+			setStatus("Path copied", C.ok)
+			copyB.Text = "COPIED!"
+			task.delay(1.2, function() copyB.Text = "COPY PATH" end)
+		else
+			setStatus("Your executor has no clipboard function", C.err)
+		end
+	end)
+	closeB.MouseButton1Click:Connect(function() select(nil) end)
+
+	-- picking ---------------------------------------------------------
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local function overUI(m)
+		local pos, size = win.AbsolutePosition, win.AbsoluteSize
+		if win.Visible and m.X >= pos.X and m.X <= pos.X + size.X and m.Y >= pos.Y and m.Y <= pos.Y + size.Y then
+			return true
+		end
+		local inset = GuiService:GetGuiInset()
+		for _, o in ipairs(playerGui:GetGuiObjectsAtPosition(m.X - inset.X, m.Y - inset.Y)) do
+			if o:IsDescendantOf(gui) then return true end
+		end
+		return false
+	end
+
+	local function pick()
+		local cam = workspace.CurrentCamera
+		if not cam then return nil end
+		local m = UserInputService:GetMouseLocation()
+		if overUI(m) then return nil, m end
+		local ray = cam:ViewportPointToRay(m.X, m.Y)
+		rayParams.FilterDescendantsInstances = {player.Character}
+		local r = workspace:Raycast(ray.Origin, ray.Direction * 3000, rayParams)
+		return r and r.Instance, m
+	end
+
+	local function onClick(_, state)
+		if state == Enum.UserInputState.Begin then
+			local part = pick()
+			if part then select(part) end
+		end
+		return Enum.ContextActionResult.Sink   -- the game never sees this click
+	end
+
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not gui.Parent then
+			CAS:UnbindAction("KRHUBDex")
+			conn:Disconnect()
+			dg:Destroy()
+			return
+		end
+		if not dexOn then return end
+		local part, m = pick()
+		if part and part ~= selected then
+			setAdornee(hoverHL, part)
+		else
+			setAdornee(hoverHL, nil)
+		end
+		if part then
+			tag.Text = part.Name .. "  (" .. part.ClassName .. ")"
+			tag.Position = UDim2.fromOffset(m.X + 16, m.Y + 18)
+			tag.Visible = true
+		else
+			tag.Visible = false
+		end
+	end)
+
+	dexOn = false
+	setDex = function(state)
+		state = state and true or false
+		if state == dexOn then return end
+		dexOn = state
+		if state then
+			CAS:BindActionAtPriority("KRHUBDex", onClick, false,
+				Enum.ContextActionPriority.High.Value, Enum.UserInputType.MouseButton1)
+		else
+			CAS:UnbindAction("KRHUBDex")
+			setAdornee(hoverHL, nil)
+			tag.Visible = false
+			select(nil)
+		end
+		setStatus(state and "Mini Dex on: click a part" or "Mini Dex off", state and C.ok or C.muted)
+		if updateUI then updateUI() end
+	end
+end)()
 
 -- Friend bubbles: every friend in your server gets their avatar in a small circle
 -- above their head. It follows them wherever they go; click it to teleport to them.
@@ -3723,6 +4075,7 @@ KB.actions.fullbright = function() setFullbright(not fullbrightOn) end
 KB.actions.espAll     = function() setEspAll(not espAll) end
 KB.actions.espNames   = function() setEspNames(not espNames) end
 KB.actions.antiAfk    = function() setAntiAfk(not antiAfkOn) end
+KB.actions.dex        = function() setDex(not dexOn) end
 KB.actions.invisible  = function() setInvisible(not invisibleOn) end
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -3937,7 +4290,7 @@ end
 		"goto / spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
 		"freecam noclip fly invisible clicktp antiafk fullbright",
-		"keybinds  bubbles  (on|off)   speed / flyspeed <number>",
+		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -4286,6 +4639,7 @@ end)()
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
 	boolCommand("bubbles", "bubbles", function() return bubblesOn end, setBubbles, "Friend avatars")
+	boolCommand("dex", "dex", function() return dexOn end, setDex, "Mini Dex")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 	boolCommand("keybinds", "keybinds", function() return KB.on end,
