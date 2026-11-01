@@ -4659,6 +4659,145 @@ refreshFriends()
 		addHint(hc, "Draw route follows the map's walkable paths, so it works in mazes. Auto-walk makes your character follow it.")
 	end
 
+
+	-- sit on tools other players are holding ---------------------------------------
+	do
+		local rideConn, rideInfo
+
+		local function mine()
+			local char = player.Character
+			return char, char and char:FindFirstChildOfClass("Humanoid"), char and char:FindFirstChild("HumanoidRootPart")
+		end
+
+		local function stopRide(msg)
+			if rideConn then rideConn:Disconnect() rideConn = nil end
+			if rideInfo then
+				rideInfo = nil
+				if msg then setStatus(msg, C.muted) end
+			end
+		end
+
+		-- every tool another player has equipped (equipped tools live in their character)
+		local function scanTools()
+			local out = {}
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= player and p.Character then
+					for _, t in ipairs(p.Character:GetChildren()) do
+						if t:IsA("Tool") then
+							local seat, handle
+							for _, d in ipairs(t:GetDescendants()) do
+								if not seat and (d:IsA("Seat") or d:IsA("VehicleSeat")) then seat = d end
+								if not handle and d:IsA("BasePart") then handle = d end
+							end
+							handle = t:FindFirstChild("Handle") or handle
+							if handle and not handle:IsA("BasePart") then handle = nil end
+							if seat or handle then out[#out + 1] = {p = p, tool = t, seat = seat, handle = handle} end
+						end
+					end
+				end
+			end
+			return out
+		end
+
+		local function sitOn(e)
+			local _, hum, root = mine()
+			if not hum or not root then setStatus("You have no character right now", C.err) return end
+			stopRide()
+			if e.seat and not e.seat.Occupant then   -- the tool has a real seat
+				root.CFrame = e.seat.CFrame * CFrame.new(0, 2, 0)
+				pcall(function() e.seat:Sit(hum) end)
+				setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
+				return
+			end
+			if not e.handle then setStatus("That tool has nothing to sit on", C.err) return end
+			-- no seat: sit and stay on top of the tool wherever it goes
+			rideInfo = e
+			rideConn = RunService.Heartbeat:Connect(function()
+				local _, h2, r2 = mine()
+				if not h2 or not r2 or not e.tool.Parent or not e.handle.Parent then
+					stopRide("The tool is gone, you got off")
+					return
+				end
+				r2.CFrame = e.handle.CFrame * CFrame.new(0, 2.2, 0)
+				r2.AssemblyLinearVelocity = Vector3.zero
+				h2.Sit = true
+			end)
+			setStatus(("Sitting on %s's %s (press Space to get off)"):format(e.p.DisplayName, e.tool.Name), C.ok)
+		end
+
+		function FND.unsit()
+			local _, hum = mine()
+			stopRide("You got off")
+			if hum then hum.Sit = false hum.Jump = true end
+		end
+		function FND.sitPlayer(p)
+			local pick
+			for _, e in ipairs(scanTools()) do
+				if e.p == p and (not pick or (e.seat and not pick.seat)) then pick = e end
+			end
+			if pick then sitOn(pick) return true end
+			return false
+		end
+
+		UserInputService.InputBegan:Connect(function(input, processed)
+			if rideInfo and not processed and input.KeyCode == Enum.KeyCode.Space then FND.unsit() end
+		end)
+		player.CharacterRemoving:Connect(function() stopRide() end)
+
+		-- the card
+		local card = makeCard(right, "Sit on tools")
+		addHint(card, "Tools other players are holding right now. Click one to sit on it.")
+		local listF = Instance.new("ScrollingFrame")
+		listF.BackgroundTransparency = 1
+		listF.BorderSizePixel = 0
+		listF.Size = UDim2.new(1, 0, 0, 112)
+		listF.LayoutOrder = nextOrder(card)
+		listF.CanvasSize = UDim2.new()
+		listF.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		listF.ScrollBarThickness = 3
+		listF.ScrollBarImageColor3 = C.faint
+		listF.Parent = card
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 4)
+		ll.SortOrder = Enum.SortOrder.LayoutOrder
+		ll.Parent = listF
+		local off = makeButton(card, "GET OFF", "ghost", 12)
+		off.Size = UDim2.new(1, 0, 0, 26)
+		off.LayoutOrder = nextOrder(card)
+		off.MouseButton1Click:Connect(function() FND.unsit() end)
+
+		local lastSig
+		local function refreshList()
+			local items = scanTools()
+			local sig = {}
+			for _, e in ipairs(items) do sig[#sig + 1] = e.p.UserId .. e.tool.Name .. tostring(e.seat ~= nil) end
+			sig = table.concat(sig, "|")
+			if sig == lastSig then return end
+			lastSig = sig
+			for _, c in ipairs(listF:GetChildren()) do
+				if c:IsA("GuiObject") then c:Destroy() end
+			end
+			if #items == 0 then
+				label(listF, {Text = "Nobody is holding a tool", TextSize = 12, TextColor3 = C.faint,
+					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, 22)})
+				return
+			end
+			for i, e in ipairs(items) do
+				local b = makeButton(listF, ("%s - %s%s"):format(e.p.DisplayName, e.tool.Name, e.seat and "  [seat]" or ""), "ghost", 11)
+				b.Size = UDim2.new(1, -6, 0, 26)
+				b.LayoutOrder = i
+				b.MouseButton1Click:Connect(function() sitOn(e) end)
+			end
+		end
+		task.spawn(function()
+			while gui.Parent do
+				task.wait(1)
+				if currentTab == "Finder" then refreshList() end
+			end
+			stopRide()
+		end)
+	end
+
 	function sync()
 		if segRef then segRef.set(FND.mode == "class" and 2 or 1) end
 		if boxRef and not boxRef:IsFocused() and FND.query ~= "" then boxRef.Text = FND.query end
@@ -5046,6 +5185,7 @@ end
 		"freecam noclip fly invisible clicktp antiafk fullbright",
 		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
 		"find <name>  ·  findclass <class>  ·  clearfind  ·  path  ·  autowalk",
+		"sit <player>  ·  unsit",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -5412,6 +5552,17 @@ end)()
 		end,
 	})
 	add({name = "clearfind", usage = "clearfind", run = function() FND.clear() return true, "Finder cleared" end})
+	add({
+		name = "sit", usage = "sit <player>",
+		suggest = playerCands,
+		run = function(arg)
+			local t, err = needPlayer(arg, "Usage: sit <player>")
+			if not t then return false, err end
+			if FND.sitPlayer(t) then return true, "Sitting on " .. t.DisplayName .. "'s tool" end
+			return false, t.DisplayName .. " isn't holding a tool"
+		end,
+	})
+	add({name = "unsit", usage = "unsit", run = function() FND.unsit() return true, "You got off" end})
 	boolCommand("path", "path", function() return FND.path end, FND.setPath, "Path")
 	boolCommand("autowalk", "autowalk", function() return FND.walk end, FND.setWalk, "Auto-walk")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
