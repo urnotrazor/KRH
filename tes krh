@@ -384,6 +384,7 @@ local TAB_DEFS = {
 	{key = "Friends",  text = "Friends",  width = 54},
 	{key = "All",      text = "Player",   width = 48},
 	{key = "ESP",      text = "ESP",      width = 38},
+	{key = "Finder",   text = "Finder",   width = 48},
 	{key = "Settings", text = "Settings", width = 58},
 }
 local TAB_BUTTONS = {}
@@ -2324,6 +2325,7 @@ local sameRefreshBtn, updatedLabel
 local rebuildOnlineLists          -- defined after the GUI (needs join logic)
 local bubblesOn, setBubbles       -- friend avatars above their heads (Friends tab switch)
 local dexOn, setDex               -- mini Dex (part picker)
+local FND = {on = false, path = false, walk = false, query = "", mode = "name"}   -- Finder tab
 local fetchOnlineFriends          -- same
 local ready = false   -- becomes true when the loading bar is done
 local doRejoin, doEmote                 -- filled in by the Player tab
@@ -3230,6 +3232,9 @@ end
 	local rejoinBtn = action("REJOIN", "primary", 1)
 	local emoteBtn  = action("UGC EMOTE", "primary", 2)
 	local helloBtn  = action("HELLO", "primary", 3)
+	local flingBtn  = action("TOUCH FLING", "primary", 4)
+	FND.flingBtn = flingBtn
+	flingBtn.MouseButton1Click:Connect(function() if FND.togglePanel then FND.togglePanel() end end)
 
 	-- rejoin: new server if you're alone, same server otherwise (retries 3x)
 	do
@@ -3269,30 +3274,120 @@ end
 		rejoinBtn.MouseButton1Click:Connect(doRejoin)
 	end
 
-	-- buttons that load an outside script
-	local function remote(btn, idle, name, url)
-		local loading = false
+	-- buttons that load an outside script.  killOnReset: when your character resets /
+	-- respawns, everything that script started through task.spawn / task.delay /
+	-- task.defer (and the thread running it) is cancelled.
+	local function remote(btn, idle, name, url, killOnReset)
+		local loading, current = false, 0
 		return function()
 			if loading then return end
 			loading = true
+			current += 1
+			local mine = current
 			btn.Text = "LOADING..."
 			setStatus("Loading " .. name .. "...", C.ok)
-			task.spawn(function()
-				local ok, err = pcall(function() loadstring(game:HttpGet(url))() end)
+
+			local threads, killConn, main = {}, nil, nil
+			local addedConns, baseFns, beforeTools = {}, {}, {}
+
+			-- tools (backpack / character / starter gear) and the respawn hooks the script made
+			local function toolHolders()
+				local out = {}
+				for _, h in ipairs({"Backpack", "StarterGear"}) do
+					local x = player:FindFirstChild(h)
+					if x then out[#out + 1] = x end
+				end
+				if player.Character then out[#out + 1] = player.Character end
+				return out
+			end
+			local function listConns()
+				local out = {}
+				if getconnections then
+					for _, sig in ipairs({player.CharacterAdded, player.CharacterRemoving}) do
+						local ok, list = pcall(getconnections, sig)
+						if ok and type(list) == "table" then
+							for _, c in ipairs(list) do out[#out + 1] = c end
+						end
+					end
+				end
+				return out
+			end
+
+			local function kill()
+				if killConn then killConn:Disconnect() killConn = nil end
+				-- stop whatever animation the script is playing
+				local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+				local animator = hum and hum:FindFirstChildOfClass("Animator")
+				if animator then
+					for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do pcall(function() tr:Stop(0) end) end
+				end
+				-- remove the tool(s) it gave you
+				for _, holder in ipairs(toolHolders()) do
+					for _, c in ipairs(holder:GetChildren()) do
+						if c:IsA("Tool") and not beforeTools[c] then pcall(function() c:Destroy() end) end
+					end
+				end
+				-- remove its "do it again on respawn" hooks
+				for _, c in ipairs(addedConns) do pcall(function() c:Disconnect() end) end
+				addedConns = {}
+				for _, th in ipairs(threads) do pcall(task.cancel, th) end
+				if main then pcall(task.cancel, main) end
+				threads = {}
+				if mine == current then
+					btn.Text = idle
+					loading = false
+					setStatus(name .. " stopped (character reset)", C.muted)
+				end
+			end
+
+			main = task.spawn(function()
+				local ok, err = pcall(function()
+					local fn = loadstring(game:HttpGet(url))
+					if killOnReset and setfenv and getfenv then
+						-- same script, but its task.spawn / delay / defer calls are tracked
+						local tracked = setmetatable({}, {__index = task})
+						for _, nm in ipairs({"spawn", "defer", "delay"}) do
+							tracked[nm] = function(...)
+								local th = task[nm](...)
+								if typeof(th) == "thread" then threads[#threads + 1] = th end
+								return th
+							end
+						end
+						pcall(setfenv, fn, setmetatable({task = tracked}, {__index = getfenv(fn)}))
+					end
+					if killOnReset then
+						for _, holder in ipairs(toolHolders()) do
+							for _, c in ipairs(holder:GetChildren()) do
+								if c:IsA("Tool") then beforeTools[c] = true end
+							end
+						end
+						for _, c in ipairs(listConns()) do
+							local f = c.Function
+							if f then baseFns[f] = true end
+						end
+						killConn = player.CharacterRemoving:Connect(kill)
+						task.delay(1.5, function()   -- connections the script made while starting up
+							for _, c in ipairs(listConns()) do
+								local f = c.Function
+								if f and not baseFns[f] and f ~= kill then addedConns[#addedConns + 1] = c end
+							end
+						end)
+					end
+					fn()
+				end)
 				if ok then
 					setStatus(name .. " loaded", C.ok)
 				else
 					warn(name .. " failed: " .. tostring(err))
 					setStatus(name .. " failed to load", C.err)
 				end
-				btn.Text = idle
-				loading = false
+				if mine == current and loading then btn.Text = idle loading = false end
 			end)
 		end
 	end
 	doEmote = remote(emoteBtn, "UGC EMOTE", "UGC emote", "https://raw.githubusercontent.com/7yd7/Hub/refs/heads/Branch/GUIS/Emotes.lua")
 	emoteBtn.MouseButton1Click:Connect(doEmote)
-	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw"))
+	helloBtn.MouseButton1Click:Connect(remote(helloBtn, "HELLO", "Hello", "https://pastefy.app/YZoglOyJ/raw", true))
 
 	-- Voice chat: same text and same button as the old VC tab
 	local vcCard = makeCard(right, "Voice chat")
@@ -3442,6 +3537,11 @@ updateUI = function()
 	sw("invisible", invisibleOn)
 	sw("friendBubbles", bubblesOn)
 	sw("dex", dexOn)
+	sw("fnd_on", FND.on)
+	sw("fling", FND.flingOn)
+	sw("fnd_path", FND.path)
+	sw("fnd_walk", FND.walk)
+	if FND.sync then FND.sync() end
 	sw("light_fb", fullbrightOn)
 	sw("keybinds", KB.on)
 	sw("boxEsp", boxCfg.enabled)
@@ -3977,8 +4077,16 @@ end
 
 	local function onClick(_, state)
 		if state == Enum.UserInputState.Begin then
-			local part = pick()
-			if part then select(part) end
+			local part, m = pick()
+			if part then
+				-- open the window right next to the cursor (flipped / clamped to stay on screen)
+				local vp, w, h = dg.AbsoluteSize, win.AbsoluteSize.X, win.AbsoluteSize.Y
+				local x = m.X + 18
+				if x + w > vp.X - 8 then x = m.X - 18 - w end
+				local y = math.clamp(m.Y + 18, 8, math.max(8, vp.Y - h - 8))
+				win.Position = UDim2.fromOffset(math.max(8, x), y)
+				select(part)
+			end
 		end
 		return Enum.ContextActionResult.Sink   -- the game never sees this click
 	end
@@ -4163,10 +4271,749 @@ for _, p in ipairs(Players:GetPlayers()) do checkFriend(p) end
 refreshFriends()
 
 --------------------------------------------------------------------
+-- Finder: search the map by name or class, draw a tracer to the nearest match,
+-- and (optionally) draw a walkable route to it - handy in mazes.
+--------------------------------------------------------------------
+;(function()
+	local PFS = game:GetService("PathfindingService")
+	local page = newPage(false)
+	FND.page = page
+
+	local matches, best, bestDist = {}, nil, 0
+	local wps, walkIdx, pathState = {}, 1, "off"
+
+	-- screen layer ------------------------------------------------------
+	local old = playerGui:FindFirstChild("KRHUBFinder")
+	if old then old:Destroy() end
+	local fg = Instance.new("ScreenGui")
+	fg.Name = "KRHUBFinder"
+	fg.ResetOnSpawn = false
+	fg.IgnoreGuiInset = true
+	fg.DisplayOrder = 40
+	fg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	fg.Parent = playerGui
+
+	local tline = Instance.new("Frame")
+	tline.AnchorPoint = Vector2.new(0.5, 0.5)
+	tline.BackgroundColor3 = C.mint
+	tline.BackgroundTransparency = 0.25
+	tline.BorderSizePixel = 0
+	tline.Visible = false
+	tline.Parent = fg
+	local tdot = Instance.new("Frame")
+	tdot.AnchorPoint = Vector2.new(0.5, 0.5)
+	tdot.Size = UDim2.fromOffset(12, 12)
+	tdot.BackgroundColor3 = C.mint
+	tdot.BorderSizePixel = 0
+	tdot.Visible = false
+	tdot.Parent = fg
+	corner(tdot, 6)
+	stroke(tdot, Color3.new(1, 1, 1), 1.5, 0)
+	local chip = Instance.new("TextLabel")
+	chip.AnchorPoint = Vector2.new(0.5, 1)
+	chip.AutomaticSize = Enum.AutomaticSize.XY
+	chip.BackgroundColor3 = C.bg
+	chip.BorderSizePixel = 0
+	chip.Font = Enum.Font.GothamMedium
+	chip.TextSize = 13
+	chip.TextColor3 = C.text
+	chip.Visible = false
+	chip.Parent = fg
+	corner(chip, 7)
+	stroke(chip, C.goldLine, 1, 0)
+	local cpad = Instance.new("UIPadding")
+	cpad.PaddingLeft, cpad.PaddingRight = UDim.new(0, 8), UDim.new(0, 8)
+	cpad.PaddingTop, cpad.PaddingBottom = UDim.new(0, 4), UDim.new(0, 4)
+	cpad.Parent = chip
+
+	local hl = Instance.new("Highlight")
+	hl.FillTransparency = 1
+	hl.OutlineColor = C.mint
+	hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	hl.Enabled = false
+	hl.Parent = fg
+
+	local pfolder = Instance.new("Folder")
+	pfolder.Name = "KRHUBPath"
+
+	local function hideAll()
+		tline.Visible, tdot.Visible, chip.Visible, hl.Enabled = false, false, false, false
+		hl.Adornee = nil
+	end
+	local function clearDraw() pfolder:ClearAllChildren() end
+
+	-- where is a thing? (parts, models, attachments, and prompts/click detectors on parts)
+	local function targetPos(inst)
+		if inst:IsA("BasePart") then return inst.Position end
+		if inst:IsA("Model") then
+			local ok, cf = pcall(inst.GetPivot, inst)
+			return ok and cf.Position or nil
+		end
+		if inst:IsA("Attachment") then return inst.WorldPosition end
+		local par = inst.Parent
+		if par then
+			if par:IsA("BasePart") then return par.Position end
+			if par:IsA("Attachment") then return par.WorldPosition end
+		end
+		return nil
+	end
+
+	local ALIASES = {prompt = "proximityprompt", click = "clickdetector", spawn = "spawnlocation", mesh = "meshpart"}
+
+	local function scan()
+		local q = FND.query:lower()
+		local out = {}
+		if q == "" then matches = out return end
+		local cls = ALIASES[q] or q
+		local char, cam = player.Character, workspace.CurrentCamera
+		local ok, all = pcall(workspace.GetDescendants, workspace)
+		if not ok then return end
+		local classMode = FND.mode == "class"
+		for n, d in ipairs(all) do
+			if n % 6000 == 0 then task.wait() end
+			local hit
+			if classMode then
+				hit = d.ClassName:lower() == cls
+			else
+				hit = d.Name:lower():find(q, 1, true) ~= nil
+					and (d:IsA("BasePart") or d:IsA("Model") or d:IsA("Attachment"))
+			end
+			if hit and d ~= workspace.Terrain
+				and not (char and d:IsDescendantOf(char))
+				and not (cam and d:IsDescendantOf(cam)) then
+				out[#out + 1] = d
+				if #out >= 600 then break end
+			end
+		end
+		matches = out
+	end
+
+	-- path ------------------------------------------------------------------
+	local rp = RaycastParams.new()
+	rp.FilterType = Enum.RaycastFilterType.Exclude
+
+	local function drawPath(list)
+		clearDraw()
+		pfolder.Parent = workspace.CurrentCamera
+		local prev
+		for i, w in ipairs(list) do
+			if i > 250 then break end
+			local pos = w.Position + Vector3.new(0, 0.7, 0)
+			local dot = Instance.new("Part")
+			dot.Shape = Enum.PartType.Ball
+			dot.Size = Vector3.new(0.8, 0.8, 0.8)
+			dot.Anchored, dot.CanCollide, dot.CanQuery, dot.CanTouch, dot.CastShadow = true, false, false, false, false
+			dot.Material = Enum.Material.Neon
+			dot.Color = C.mint
+			dot.Position = pos
+			dot.Parent = pfolder
+			if prev then
+				local len = (pos - prev).Magnitude
+				if len > 0.05 then
+					local seg = Instance.new("Part")
+					seg.Size = Vector3.new(0.3, 0.3, len)
+					seg.Anchored, seg.CanCollide, seg.CanQuery, seg.CanTouch, seg.CastShadow = true, false, false, false, false
+					seg.Material = Enum.Material.Neon
+					seg.Color = C.mint
+					seg.Transparency = 0.25
+					seg.CFrame = CFrame.lookAt(prev:Lerp(pos, 0.5), pos)
+					seg.Parent = pfolder
+				end
+			end
+			prev = pos
+		end
+	end
+
+	local function computePath(root, goal)
+		local path = PFS:CreatePath({AgentRadius = 1.8, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 4})
+		local function try(to)
+			local ok = pcall(function() path:ComputeAsync(root.Position, to) end)
+			return ok and path.Status == Enum.PathStatus.Success
+		end
+		local good = try(goal)
+		if not good then   -- the target may sit inside / above something: aim for the floor under it
+			rp.FilterDescendantsInstances = {player.Character}
+			local r = workspace:Raycast(goal + Vector3.new(0, 4, 0), Vector3.new(0, -60, 0), rp)
+			if r then good = try(r.Position + Vector3.new(0, 1.5, 0)) end
+		end
+		if good then
+			wps = path:GetWaypoints()
+			local near, nd = 1, math.huge
+			for i, w in ipairs(wps) do
+				local d = (w.Position - root.Position).Magnitude
+				if d < nd then near, nd = i, d end
+			end
+			walkIdx = math.min(near + 1, #wps)
+			pathState = ("route found (%d steps)"):format(#wps)
+			drawPath(wps)
+		else
+			wps = {}
+			clearDraw()
+			pathState = "no route"
+		end
+	end
+
+	-- the tracer, every frame ---------------------------------------------------
+	local conn
+	conn = RunService.RenderStepped:Connect(function()
+		if not gui.Parent then
+			conn:Disconnect()
+			fg:Destroy()
+			pfolder:Destroy()
+			return
+		end
+		local cam = workspace.CurrentCamera
+		local char = player.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not FND.on or not cam or not root then best = nil hideAll() return end
+
+		local bp, bd
+		best = nil
+		for i = #matches, 1, -1 do
+			local m = matches[i]
+			if m.Parent then
+				local pos = targetPos(m)
+				if pos then
+					local d = (pos - root.Position).Magnitude
+					if not bd or d < bd then best, bd, bp = m, d, pos end
+				end
+			else
+				table.remove(matches, i)
+			end
+		end
+		bestDist = bd or 0
+		FND.bestPos = bp
+		if not best then hideAll() return end
+
+		local ok3d = best:IsA("BasePart") or best:IsA("Model")
+		hl.Adornee = ok3d and best or nil
+		hl.Enabled = ok3d
+
+		local vp = cam.ViewportSize
+		local sp = cam:WorldToViewportPoint(bp)
+		local x, y = sp.X, sp.Y
+		if sp.Z < 0 then x, y = vp.X - x, vp.Y - y end
+		local cx, cy = vp.X / 2, vp.Y / 2
+		local dx, dy = x - cx, y - cy
+		local sx = dx ~= 0 and (cx - 30) / math.abs(dx) or math.huge
+		local sy = dy ~= 0 and (cy - 50) / math.abs(dy) or math.huge
+		local k = math.min(sx, sy)
+		if sp.Z < 0 or k < 1 then
+			if k == math.huge then k = 1 end
+			x, y = cx + dx * k, cy + dy * k
+		end
+
+		local ox, oy = cx, vp.Y - 36
+		local lx, ly = x - ox, y - oy
+		tline.Size = UDim2.fromOffset(math.sqrt(lx * lx + ly * ly), 2)
+		tline.Position = UDim2.fromOffset((ox + x) / 2, (oy + y) / 2)
+		tline.Rotation = math.deg(math.atan2(ly, lx))
+		tline.Visible = true
+		tdot.Position = UDim2.fromOffset(x, y)
+		tdot.Visible = true
+		chip.Text = ("%s  -  %d studs"):format(best.Name, math.floor(bd + 0.5))
+		chip.Position = UDim2.fromOffset(math.clamp(x, 90, vp.X - 90), math.max(34, y - 14))
+		chip.Visible = true
+	end)
+
+	-- public controls -----------------------------------------------------------
+	local sync
+	function FND.setOn(state)
+		FND.on = state and true or false
+		if not FND.on then
+			FND.walk = false
+			hideAll()
+			clearDraw()
+			wps, pathState = {}, "off"
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if hum and root then hum:MoveTo(root.Position) end
+		else
+			task.spawn(scan)
+		end
+		if updateUI then updateUI() end
+	end
+	function FND.setPath(state)
+		FND.path = state and true or false
+		if not FND.path then
+			FND.walk = false
+			clearDraw()
+			wps, pathState = {}, "off"
+		end
+		if updateUI then updateUI() end
+	end
+	function FND.setWalk(state)
+		FND.walk = state and true or false
+		if FND.walk then
+			FND.path = true
+			if not FND.on and FND.query ~= "" then FND.setOn(true) end
+		else
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if hum and root then hum:MoveTo(root.Position) end
+		end
+		if updateUI then updateUI() end
+	end
+	function FND.find(text, mode)
+		FND.query = text
+		if mode then FND.mode = mode end
+		FND.on = true
+		sync()
+		task.spawn(function()
+			scan()
+			setStatus(("Found %d matching '%s'"):format(#matches, text), #matches > 0 and C.ok or C.err)
+		end)
+		if updateUI then updateUI() end
+	end
+	function FND.clear()
+		FND.query = ""
+		matches = {}
+		FND.setPath(false)
+		FND.setOn(false)
+		sync()
+	end
+
+	-- the Finder tab ---------------------------------------------------------------
+	local left  = makeColumn(page, "left")
+	local right = makeColumn(page, "right")
+	local boxRef, segRef, infoT, infoD, infoM, infoP
+
+	local function row(card, h)
+		local r = Instance.new("Frame")
+		r.BackgroundTransparency = 1
+		r.Size = UDim2.new(1, 0, 0, h)
+		r.LayoutOrder = nextOrder(card)
+		r.Parent = card
+		return r
+	end
+
+	do
+		local card = makeCard(left, "Finder")
+
+		local br = row(card, 30)
+		boxRef = Instance.new("TextBox")
+		boxRef.PlaceholderText = "name, e.g. coin   (or a class)"
+		boxRef.PlaceholderColor3 = C.faint
+		boxRef.Text = ""
+		boxRef.ClearTextOnFocus = false
+		boxRef.Font = Enum.Font.Gotham
+		boxRef.TextSize = 13
+		boxRef.TextColor3 = C.text
+		boxRef.TextXAlignment = Enum.TextXAlignment.Left
+		boxRef.BackgroundColor3 = C.field
+		boxRef.BorderSizePixel = 0
+		boxRef.Size = UDim2.fromScale(1, 1)
+		boxRef.Parent = br
+		corner(boxRef, 7)
+		stroke(boxRef, C.cardStroke, 1, 0)
+		local bpad = Instance.new("UIPadding")
+		bpad.PaddingLeft = UDim.new(0, 9)
+		bpad.Parent = boxRef
+
+		local mr = row(card, 26)
+		label(mr, {Text = "Search by", Font = Enum.Font.GothamMedium, TextSize = 12,
+			TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -130, 1, 0)})
+		segRef = makeSegmented(mr, {"NAME", "CLASS"}, UDim2.fromOffset(122, 24), {C.mint, C.mint})
+		segRef.frame.AnchorPoint = Vector2.new(1, 0.5)
+		segRef.frame.Position = UDim2.new(1, 0, 0.5, 0)
+		segRef.onSelect = function(idx)
+			FND.mode = idx == 2 and "class" or "name"
+			if FND.on then task.spawn(scan) end
+		end
+
+		local grid = UI.grid(card, 28, 2)
+		local go = makeButton(grid, "FIND", "primary", 12)
+		go.LayoutOrder = 1
+		local clr = makeButton(grid, "CLEAR", "ghost", 12)
+		clr.LayoutOrder = 2
+		local function doFind()
+			local t = boxRef.Text:gsub("^%s+", ""):gsub("%s+$", "")
+			if t == "" then setStatus("Type a name or class first", C.err) return end
+			FND.find(t)
+		end
+		go.MouseButton1Click:Connect(doFind)
+		boxRef.FocusLost:Connect(function(enter) if enter then doFind() end end)
+		clr.MouseButton1Click:Connect(function() FND.clear() boxRef.Text = "" end)
+
+		UI.switchRow(card, "Tracer to nearest", "fnd_on", function(on)
+			if on and FND.query == "" and boxRef.Text ~= "" then FND.find(boxRef.Text) return end
+			FND.setOn(on)
+		end)
+		UI.switchRow(card, "Draw route (pathfinding)", "fnd_path", function(on) FND.setPath(on) end)
+		UI.switchRow(card, "Auto-walk along route", "fnd_walk", function(on) FND.setWalk(on) end)
+	end
+
+	do
+		local card = makeCard(right, "Nearest match")
+		local function info(name)
+			local r = row(card, 20)
+			label(r, {Text = name, Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = C.muted,
+				TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(0.34, 0, 1, 0)})
+			return label(r, {Text = "-", Font = Enum.Font.GothamMedium, TextSize = 12,
+				TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+				Position = UDim2.fromScale(0.34, 0), Size = UDim2.new(0.66, 0, 1, 0)})
+		end
+		infoT, infoD, infoM, infoP = info("Target"), info("Distance"), info("Matches"), info("Route")
+
+		local hc = makeCard(right, "How to use")
+		addHint(hc, "Type a name (like  coin  or  door) and press FIND. A line points to the closest match and its distance is shown.")
+		addHint(hc, "Switch to CLASS to find things like  proximityprompt,  clickdetector  or  spawnlocation.")
+		addHint(hc, "Draw route follows the map's walkable paths, so it works in mazes. Auto-walk makes your character follow it.")
+	end
+
+
+	-- sit on tools other players are holding ---------------------------------------
+	do
+		local rideConn, rideInfo
+
+		local function mine()
+			local char = player.Character
+			return char, char and char:FindFirstChildOfClass("Humanoid"), char and char:FindFirstChild("HumanoidRootPart")
+		end
+
+		local function stopRide(msg)
+			if rideConn then rideConn:Disconnect() rideConn = nil end
+			if rideInfo then
+				rideInfo = nil
+				if msg then setStatus(msg, C.muted) end
+			end
+		end
+
+		-- every tool another player has equipped (equipped tools live in their character)
+		local function scanTools()
+			local out = {}
+			for _, p in ipairs(Players:GetPlayers()) do
+				if p ~= player and p.Character then
+					for _, t in ipairs(p.Character:GetChildren()) do
+						if t:IsA("Tool") then
+							-- only tools with a seat, and only while nobody is sitting on it
+							for _, d in ipairs(t:GetDescendants()) do
+								if (d:IsA("Seat") or d:IsA("VehicleSeat")) and not d.Occupant then
+									out[#out + 1] = {p = p, tool = t, seat = d}
+									break
+								end
+							end
+						end
+					end
+				end
+			end
+			return out
+		end
+
+		local function sitOn(e)
+			local _, hum, root = mine()
+			if not hum or not root then setStatus("You have no character right now", C.err) return end
+			stopRide()
+			if e.seat.Occupant then setStatus("Someone is already sitting there", C.err) return end
+			root.CFrame = e.seat.CFrame * CFrame.new(0, 2, 0)
+			pcall(function() e.seat:Sit(hum) end)
+			setStatus(("Sitting on %s's %s"):format(e.p.DisplayName, e.tool.Name), C.ok)
+		end
+
+		function FND.unsit()
+			local _, hum = mine()
+			stopRide("You got off")
+			if hum then hum.Sit = false hum.Jump = true end
+		end
+		function FND.sitPlayer(p)
+			for _, e in ipairs(scanTools()) do
+				if e.p == p then sitOn(e) return true end
+			end
+			return false
+		end
+
+		UserInputService.InputBegan:Connect(function(input, processed)
+			if rideInfo and not processed and input.KeyCode == Enum.KeyCode.Space then FND.unsit() end
+		end)
+		player.CharacterRemoving:Connect(function() stopRide() end)
+
+		-- the card
+		local card = makeCard(right, "Sit on tools")
+		addHint(card, "Tools with a free seat that other players are holding right now. Click one to sit on it.")
+		local listF = Instance.new("ScrollingFrame")
+		listF.BackgroundTransparency = 1
+		listF.BorderSizePixel = 0
+		listF.Size = UDim2.new(1, 0, 0, 112)
+		listF.LayoutOrder = nextOrder(card)
+		listF.CanvasSize = UDim2.new()
+		listF.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		listF.ScrollBarThickness = 3
+		listF.ScrollBarImageColor3 = C.faint
+		listF.Parent = card
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 4)
+		ll.SortOrder = Enum.SortOrder.LayoutOrder
+		ll.Parent = listF
+		local off = makeButton(card, "GET OFF", "ghost", 12)
+		off.Size = UDim2.new(1, 0, 0, 26)
+		off.LayoutOrder = nextOrder(card)
+		off.MouseButton1Click:Connect(function() FND.unsit() end)
+
+		local lastSig
+		local function refreshList()
+			local items = scanTools()
+			local sig = {}
+			for _, e in ipairs(items) do sig[#sig + 1] = e.p.UserId .. e.tool.Name end
+			sig = table.concat(sig, "|")
+			if sig == lastSig then return end
+			lastSig = sig
+			for _, c in ipairs(listF:GetChildren()) do
+				if c:IsA("GuiObject") then c:Destroy() end
+			end
+			if #items == 0 then
+				label(listF, {Text = "No tool with a free seat", TextSize = 12, TextColor3 = C.faint,
+					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, 22)})
+				return
+			end
+			for i, e in ipairs(items) do
+				local b = makeButton(listF, ("%s - %s"):format(e.p.DisplayName, e.tool.Name), "ghost", 11)
+				b.Size = UDim2.new(1, -6, 0, 26)
+				b.LayoutOrder = i
+				b.MouseButton1Click:Connect(function() sitOn(e) end)
+			end
+		end
+		task.spawn(function()
+			while gui.Parent do
+				task.wait(1)
+				if currentTab == "Finder" then refreshList() end
+			end
+			stopRide()
+		end)
+	end
+
+	function sync()
+		if segRef then segRef.set(FND.mode == "class" and 2 or 1) end
+		if boxRef and not boxRef:IsFocused() and FND.query ~= "" then boxRef.Text = FND.query end
+	end
+	FND.sync = sync
+
+	-- background loops ------------------------------------------------------------------
+	task.spawn(function()      -- keep the match list fresh
+		while gui.Parent do
+			task.wait(2)
+			if FND.on and FND.query ~= "" then scan() end
+		end
+	end)
+
+	task.spawn(function()      -- info card
+		while gui.Parent do
+			task.wait(0.25)
+			if currentTab == "Finder" then
+				infoT.Text = FND.on and best and best.Name or "-"
+				infoD.Text = FND.on and best and ("%d studs"):format(math.floor(bestDist + 0.5)) or "-"
+				infoM.Text = FND.on and tostring(#matches) or "-"
+				infoP.Text = FND.path and FND.on and pathState or "off"
+			end
+		end
+	end)
+
+	task.spawn(function()      -- route
+		while gui.Parent do
+			task.wait(0.8)
+			local char = player.Character
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if FND.on and FND.path and best and FND.bestPos and root then
+				computePath(root, FND.bestPos)
+			elseif #wps > 0 then
+				wps = {}
+				clearDraw()
+			end
+		end
+	end)
+
+	task.spawn(function()      -- auto-walk
+		local lastPos, lastT = nil, os.clock()
+		while gui.Parent do
+			task.wait(0.1)
+			local char = player.Character
+			local hum = char and char:FindFirstChildOfClass("Humanoid")
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if FND.on and FND.walk and hum and root and #wps > 0 and best then
+				if bestDist < 4 then
+					hum:MoveTo(root.Position)
+					pathState = "arrived"
+				else
+					local w = wps[walkIdx]
+					if w then
+						local flat = Vector3.new(w.Position.X - root.Position.X, 0, w.Position.Z - root.Position.Z).Magnitude
+						if flat < 3.5 and walkIdx < #wps then walkIdx += 1 w = wps[walkIdx] end
+						if w.Action == Enum.PathWaypointAction.Jump then hum.Jump = true end
+						hum:MoveTo(w.Position)
+					end
+					-- stuck? jump
+					if os.clock() - lastT > 1.5 then
+						if lastPos and (root.Position - lastPos).Magnitude < 1 then hum.Jump = true end
+						lastPos, lastT = root.Position, os.clock()
+					end
+				end
+			end
+		end
+	end)
+end)()
+
+--------------------------------------------------------------------
+-- Touch fling: a small panel (opened by the TOUCH FLING button) with the on / off
+-- switch. While on, anyone you run into gets thrown; you keep moving normally.
+--------------------------------------------------------------------
+;(function()
+	local old = playerGui:FindFirstChild("KRHUBFling")
+	if old then old:Destroy() end
+	local fg = Instance.new("ScreenGui")
+	fg.Name = "KRHUBFling"
+	fg.ResetOnSpawn = false
+	fg.IgnoreGuiInset = true
+	fg.DisplayOrder = 50
+	fg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	fg.Parent = playerGui
+
+	local win = Instance.new("CanvasGroup")
+	win.Size = UDim2.fromOffset(260, 178)
+	win.Position = UDim2.fromOffset(130, 170)
+	win.BackgroundColor3 = C.bg
+	win.BorderSizePixel = 0
+	win.GroupTransparency = 1
+	win.Visible = false
+	win.Parent = fg
+	corner(win, 12)
+	stroke(win, C.cardStroke, 1, 0)
+
+	local title = Instance.new("Frame")
+	title.Size = UDim2.new(1, 0, 0, 38)
+	title.BackgroundTransparency = 1
+	title.Parent = win
+	label(title, {Text = "Touch Fling", Font = Enum.Font.GothamBold, TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Left, Position = UDim2.fromOffset(14, 0),
+		Size = UDim2.new(1, -52, 1, 0)})
+	local closeB = Instance.new("TextButton")
+	closeB.Text = "X"
+	closeB.Font = Enum.Font.GothamBold
+	closeB.TextSize = 14
+	closeB.TextColor3 = C.muted
+	closeB.BackgroundTransparency = 1
+	closeB.AnchorPoint = Vector2.new(1, 0.5)
+	closeB.Position = UDim2.new(1, -8, 0.5, 0)
+	closeB.Size = UDim2.fromOffset(28, 28)
+	closeB.Parent = title
+	closeB.MouseEnter:Connect(function() tween(closeB, 0.12, {TextColor3 = C.text}) end)
+	closeB.MouseLeave:Connect(function() tween(closeB, 0.12, {TextColor3 = C.muted}) end)
+	local line = Instance.new("Frame")
+	line.BackgroundColor3 = C.cardStroke
+	line.BorderSizePixel = 0
+	line.Position = UDim2.new(0, 12, 1, -1)
+	line.Size = UDim2.new(1, -24, 0, 1)
+	line.Parent = title
+
+	local row = Instance.new("Frame")
+	row.BackgroundTransparency = 1
+	row.Position = UDim2.fromOffset(14, 50)
+	row.Size = UDim2.new(1, -28, 0, 28)
+	row.Parent = win
+	label(row, {Text = "Fling", Font = Enum.Font.GothamMedium, TextSize = 13,
+		TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -100, 1, 0)})
+	local seg = makeSegmented(row, {"OFF", "ON"}, UDim2.fromOffset(88, 26), {C.red, C.mint})
+	seg.frame.AnchorPoint = Vector2.new(1, 0.5)
+	seg.frame.Position = UDim2.new(1, 0, 0.5, 0)
+	switches.fling = seg
+
+	local note = label(win, {
+		Text = "Turn it ON, then run into other players and they get thrown. Your own movement stays normal. Turn it OFF when you're done.",
+		Font = Enum.Font.Gotham, TextSize = 12, TextColor3 = C.muted, TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left, TextYAlignment = Enum.TextYAlignment.Top,
+		Position = UDim2.fromOffset(14, 88), Size = UDim2.new(1, -28, 0, 56)})
+	local stateL = label(win, {Text = "Off", Font = Enum.Font.GothamBold, TextSize = 12, TextColor3 = C.muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Position = UDim2.new(0, 14, 1, -28), Size = UDim2.new(1, -28, 0, 18)})
+
+	-- drag by the title bar
+	do
+		local drag, startMouse, startPos
+		title.InputBegan:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then
+				drag, startMouse, startPos = true, UserInputService:GetMouseLocation(), win.Position
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(i)
+			if drag and i.UserInputType == Enum.UserInputType.MouseMovement then
+				local d = UserInputService:GetMouseLocation() - startMouse
+				win.Position = UDim2.fromOffset(startPos.X.Offset + d.X, startPos.Y.Offset + d.Y)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(i)
+			if i.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+		end)
+	end
+
+	-- fade in / out (end state is forced, so an interrupted tween can't leave it half visible)
+	local winOpen = false
+	local function openWin()
+		if winOpen then return end
+		winOpen = true
+		win.Visible = true
+		tween(win, 0.2, {GroupTransparency = 0})
+		task.delay(0.3, function() if winOpen then win.GroupTransparency = 0 end end)
+	end
+	local function closeWin()
+		if not winOpen then return end
+		winOpen = false
+		tween(win, 0.18, {GroupTransparency = 1})
+		task.delay(0.25, function()
+			if not winOpen then win.GroupTransparency = 1 win.Visible = false end
+		end)
+	end
+	function FND.togglePanel()
+		if winOpen then closeWin() else openWin() end
+	end
+	closeB.MouseButton1Click:Connect(closeWin)
+
+	-- the fling itself ---------------------------------------------------------
+	FND.flingOn = false
+	local running = false
+	local function loop()
+		running = true
+		local hb = RunService.Heartbeat
+		while FND.flingOn and gui.Parent do
+			hb:Wait()
+			local char = player.Character
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if root then
+				local vel = root.AssemblyLinearVelocity
+				root.AssemblyLinearVelocity = vel * 10000 + Vector3.new(0, 10000, 0)
+				RunService.RenderStepped:Wait()
+				root.AssemblyLinearVelocity = vel
+				RunService.Stepped:Wait()
+				root.AssemblyLinearVelocity = vel + Vector3.new(0, 0.1, 0)
+			end
+		end
+		running = false
+	end
+
+	function FND.setFling(state)
+		state = state and true or false
+		if state == FND.flingOn then return end
+		FND.flingOn = state
+		if state and not running then task.spawn(loop) end
+		stateL.Text = state and "ON - run into players" or "Off"
+		stateL.TextColor3 = state and C.mint or C.muted
+		if FND.flingBtn then FND.flingBtn.Text = state and "FLING: ON" or "TOUCH FLING" end
+		setStatus(state and "Touch fling on" or "Touch fling off", state and C.ok or C.muted)
+		if updateUI then updateUI() end
+	end
+	seg.onSelect = function(idx) FND.setFling(idx == 2) end
+
+	task.spawn(function()
+		while gui.Parent do task.wait(1) end
+		FND.flingOn = false
+		fg:Destroy()
+	end)
+end)()
+
+--------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Settings = 5}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Settings = settingsPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Finder = 5, Settings = 6}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Finder = FND.page, Settings = settingsPage}
 
 local function paintTabs(name)
 	for key, btn in pairs(TAB_BUTTONS) do
@@ -4478,6 +5325,8 @@ end
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
 		"freecam noclip fly invisible clicktp antiafk fullbright",
 		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
+		"find <name>  ·  findclass <class>  ·  clearfind  ·  path  ·  autowalk",
+		"sit <player>  ·  unsit  ·  fling on|off",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -4827,6 +5676,37 @@ end)()
 	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
 	boolCommand("bubbles", "bubbles", function() return bubblesOn end, setBubbles, "Friend avatars")
 	boolCommand("dex", "dex", function() return dexOn end, setDex, "Mini Dex")
+	add({
+		name = "find", usage = "find <name>",
+		run = function(arg)
+			if arg == "" then return false, "Usage: find <name>" end
+			FND.find(arg, "name")
+			return true, "Finding " .. arg
+		end,
+	})
+	add({
+		name = "findclass", usage = "findclass <class>",
+		run = function(arg)
+			if arg == "" then return false, "Usage: findclass <class>  (e.g. proximityprompt)" end
+			FND.find(arg, "class")
+			return true, "Finding class " .. arg
+		end,
+	})
+	add({name = "clearfind", usage = "clearfind", run = function() FND.clear() return true, "Finder cleared" end})
+	add({
+		name = "sit", usage = "sit <player>",
+		suggest = playerCands,
+		run = function(arg)
+			local t, err = needPlayer(arg, "Usage: sit <player>")
+			if not t then return false, err end
+			if FND.sitPlayer(t) then return true, "Sitting on " .. t.DisplayName .. "'s tool" end
+			return false, t.DisplayName .. " has no tool with a free seat"
+		end,
+	})
+	add({name = "unsit", usage = "unsit", run = function() FND.unsit() return true, "You got off" end})
+	boolCommand("fling", "fling", function() return FND.flingOn and true or false end, FND.setFling, "Touch fling")
+	boolCommand("path", "path", function() return FND.path end, FND.setPath, "Path")
+	boolCommand("autowalk", "autowalk", function() return FND.walk end, FND.setWalk, "Auto-walk")
 	boolCommand("antiafk", "antiafk", function() return antiAfkOn end, setAntiAfk, "Anti-AFK")
 	boolCommand("fullbright", "fullbright", function() return fullbrightOn end, setFullbright, "Fullbright")
 	boolCommand("keybinds", "keybinds", function() return KB.on end,
@@ -4906,18 +5786,18 @@ end)()
 		run = function() doEmote() return true, "Loading UGC emote..." end,
 	})
 
-	local TAB_NAMES = {teleport = "Normal", friends = "Friends", player = "All", misc = "All", tools = "All", vc = "All", esp = "ESP", settings = "Settings"}
+	local TAB_NAMES = {teleport = "Normal", friends = "Friends", player = "All", misc = "All", tools = "All", vc = "All", esp = "ESP", finder = "Finder", settings = "Settings"}
 	add({
-		name = "tab", usage = "tab teleport|friends|player|esp|settings",
+		name = "tab", usage = "tab teleport|friends|player|esp|finder|settings",
 		suggest = function()
 			return {
-				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""},
+				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""}, {text = "finder", desc = ""},
 				{text = "tools", desc = ""}, {text = "settings", desc = ""},
 			}
 		end,
 		run = function(arg)
 			local key = TAB_NAMES[arg:lower()]
-			if not key then return false, "Usage: tab teleport|friends|player|esp|settings" end
+			if not key then return false, "Usage: tab teleport|friends|player|esp|finder|settings" end
 			setVisible(true)
 			switchTab(key)
 			return true, "Opened " .. arg:lower()
