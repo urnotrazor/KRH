@@ -2352,6 +2352,7 @@ local KB = {
 		{id = "espNames",   name = "ESP names",          default = false},
 		{id = "antiAfk",    name = "Anti-AFK",           default = false},
 		{id = "invisible",  name = "Invisible",          default = false},
+		{id = "airwalk",    name = "Airwalk",            default = false},
 		{id = "dex",        name = "Mini Dex",           default = false},
 	},
 }
@@ -3199,6 +3200,7 @@ end
 	UI.switchRow(card, "Fly", "fly", function(on) if on ~= flyOn then toggleFly() end end)
 	UI.switchRow(card, "Noclip", "noclip", setNoclip)
 	UI.switchRow(card, "Invisible", "invisible", function(on) setInvisible(on) end)
+	UI.switchRow(card, "Airwalk  (Q down, E up)", "airwalk", function(on) if FND.setAir then FND.setAir(on) end end)
 	UI.switchRow(card, "Freecam", "freecam", function(on) if on ~= freecamOn then toggleFreecam() end end)
 	UI.switchRow(card, "Click teleport", "clickTp", setClickTp)
 	flySliderApi = UI.sliderRow(card, left, "Fly speed", 10, 300, flySpeed, "st/s", function(v) flySpeed = v end)
@@ -3221,6 +3223,7 @@ end
 	UI.switchRow(world, "Fullbright", "light_fb", function(on) setFullbright(on) end)
 	UI.switchRow(world, "Anti-AFK", "antiAfk", function(on) if on ~= antiAfkOn then setAntiAfk(on) end end)
 	UI.switchRow(world, "Mini Dex (click parts)", "dex", function(on) setDex(on) end)
+	UI.switchRow(world, "Instant proximity", "instantPrompt", function(on) if FND.setInstant then FND.setInstant(on) end end)
 
 	local act = makeCard(right, "Actions")
 	local grid = UI.grid(act, 30, 3)
@@ -3547,6 +3550,8 @@ updateUI = function()
 	sw("fly", flyOn)
 	sw("clickTp", clickTpOn)
 	sw("invisible", invisibleOn)
+	sw("airwalk", FND.airOn)
+	sw("instantPrompt", FND.instantOn)
 	sw("friendBubbles", bubblesOn)
 	sw("dex", dexOn)
 	sw("fnd_on", FND.on)
@@ -4877,6 +4882,141 @@ refreshFriends()
 end)()
 
 --------------------------------------------------------------------
+-- Airwalk: an invisible platform follows your feet, so you can walk on air.
+-- Q lowers it, E raises it. It only exists on your screen.
+--------------------------------------------------------------------
+;(function()
+	FND.airOn = false
+	local part, conn
+	local level = 0
+
+	local function feetY()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return nil end
+		local off = hum.RigType == Enum.HumanoidRigType.R6 and 3 or (hum.HipHeight + root.Size.Y / 2)
+		return root.Position.Y - off
+	end
+
+	local function stop()
+		if conn then conn:Disconnect() conn = nil end
+		if part then part:Destroy() part = nil end
+	end
+
+	function FND.setAir(state)
+		state = state and true or false
+		if state == FND.airOn then return end
+		FND.airOn = state
+		stop()
+		if state then
+			level = feetY() or 0
+			part = Instance.new("Part")
+			part.Name = "KRHUBAirwalk"
+			part.Size = Vector3.new(8, 1, 8)
+			part.Transparency = 1
+			part.Anchored = true
+			part.CanQuery = false
+			part.CanTouch = false
+			part.CastShadow = false
+			part.Parent = workspace.CurrentCamera
+			conn = RunService.Heartbeat:Connect(function(dt)
+				if not gui.Parent then FND.setAir(false) return end
+				local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+				if not root then return end
+				if not UserInputService:GetFocusedTextBox() then
+					if UserInputService:IsKeyDown(Enum.KeyCode.Q) then level -= 22 * dt end
+					if UserInputService:IsKeyDown(Enum.KeyCode.E) then level += 22 * dt end
+				end
+				if part.Parent ~= workspace.CurrentCamera then part.Parent = workspace.CurrentCamera end
+				part.CFrame = CFrame.new(root.Position.X, level - 0.5, root.Position.Z)
+			end)
+			setStatus("Airwalk on (Q down, E up)", C.ok)
+		else
+			setStatus("Airwalk off", C.muted)
+		end
+		if updateUI then updateUI() end
+	end
+
+	-- after a respawn, start from the new spot
+	player.CharacterAdded:Connect(function()
+		if not FND.airOn then return end
+		task.wait(0.6)
+		level = feetY() or level
+	end)
+end)()
+
+--------------------------------------------------------------------
+-- Instant proximity: every ProximityPrompt fires the moment you press its key
+-- (no holding). Original hold times are put back when you turn it off.
+--------------------------------------------------------------------
+;(function()
+	FND.instantOn = false
+	local PPS = game:GetService("ProximityPromptService")
+	local orig = {}   -- [prompt] = original HoldDuration
+	local watch = {}  -- [prompt] = connection that keeps HoldDuration at 0
+	local addConn, shownConn, holdConn
+
+	local function instant(pp)
+		if not pp:IsA("ProximityPrompt") then return end
+		if pp.HoldDuration ~= 0 then
+			if orig[pp] == nil then orig[pp] = pp.HoldDuration end
+			pp.HoldDuration = 0
+		end
+		-- some games set the hold time back on their own: put it at 0 again
+		if not watch[pp] then
+			watch[pp] = pp:GetPropertyChangedSignal("HoldDuration"):Connect(function()
+				if FND.instantOn and pp.HoldDuration ~= 0 then pp.HoldDuration = 0 end
+			end)
+		end
+	end
+
+	function FND.setInstant(state)
+		state = state and true or false
+		if state == FND.instantOn then return end
+		FND.instantOn = state
+		if state then
+			shownConn = PPS.PromptShown:Connect(instant)   -- catches prompts anywhere, as they appear
+			-- the moment you start holding the key, trigger the prompt right away
+			-- (needs an executor with fireproximityprompt; otherwise only the 0 hold time is used)
+			holdConn = PPS.PromptButtonHoldBegan:Connect(function(prompt, who)
+				if who == player and fireproximityprompt then
+					pcall(fireproximityprompt, prompt)
+				end
+			end)
+			addConn = workspace.DescendantAdded:Connect(instant)
+			task.spawn(function()
+				local ok, all = pcall(workspace.GetDescendants, workspace)
+				if not ok then return end
+				for n, d in ipairs(all) do
+					if not FND.instantOn then return end
+					instant(d)
+					if n % 4000 == 0 then task.wait() end
+				end
+			end)
+			setStatus("Instant proximity on", C.ok)
+		else
+			if shownConn then shownConn:Disconnect() shownConn = nil end
+			if addConn then addConn:Disconnect() addConn = nil end
+			if holdConn then holdConn:Disconnect() holdConn = nil end
+			for pp, c in pairs(watch) do c:Disconnect() end
+			watch = {}
+			for pp, hold in pairs(orig) do
+				if pp.Parent then pp.HoldDuration = hold end
+			end
+			orig = {}
+			setStatus("Instant proximity off", C.muted)
+		end
+		if updateUI then updateUI() end
+	end
+
+	task.spawn(function()
+		while gui.Parent do task.wait(1) end
+		if FND.instantOn then FND.setInstant(false) end
+	end)
+end)()
+
+--------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
 local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Finder = 5, Settings = 6}
@@ -4978,6 +5118,7 @@ KB.actions.espNames   = function() setEspNames(not espNames) end
 KB.actions.antiAfk    = function() setAntiAfk(not antiAfkOn) end
 KB.actions.dex        = function() setDex(not dexOn) end
 KB.actions.invisible  = function() setInvisible(not invisibleOn) end
+KB.actions.airwalk    = function() FND.setAir(not FND.airOn) end
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if processed or capturingKey then return end
@@ -5190,7 +5331,7 @@ end
 	addHint(ref, table.concat({
 		"goto / spectate <player>  ·  unspectate",
 		"esp on|off|<player>  ·  espnames  ·  clearesp",
-		"freecam noclip fly invisible clicktp antiafk fullbright",
+		"freecam noclip fly invisible airwalk instantprompt clicktp antiafk fullbright",
 		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
 		"find <name>  ·  findclass <class>  ·  clearfind  ·  path  ·  autowalk",
 		"sit <player>  ·  unsit",
@@ -5541,6 +5682,8 @@ end)()
 		function(v) if v then startFly() else stopFly() end end, "Fly")
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
+	boolCommand("instantprompt", "instantprompt", function() return FND.instantOn and true or false end, FND.setInstant, "Instant proximity")
+	boolCommand("airwalk", "airwalk", function() return FND.airOn and true or false end, FND.setAir, "Airwalk")
 	boolCommand("bubbles", "bubbles", function() return bubblesOn end, setBubbles, "Friend avatars")
 	boolCommand("dex", "dex", function() return dexOn end, setDex, "Mini Dex")
 	add({
