@@ -385,6 +385,7 @@ local TAB_DEFS = {
 	{key = "All",      text = "Player",   width = 48},
 	{key = "ESP",      text = "ESP",      width = 38},
 	{key = "Finder",   text = "Finder",   width = 48},
+	{key = "Troll",    text = "Troll",    width = 44},
 	{key = "Settings", text = "Settings", width = 58},
 }
 local TAB_BUTTONS = {}
@@ -4663,42 +4664,6 @@ refreshFriends()
 		UI.switchRow(card, "Auto-walk along route", "fnd_walk", function(on) FND.setWalk(on) end)
 	end
 
-	do   -- Mimic: copy another player's moves a moment later
-		local card = makeCard(left, "Mimic")
-		addHint(card, "Repeats another player's moves a little after they do them. You stay where you are. Your own movement keys are ignored while it is on.")
-		local br = row(card, 30)
-		local mbox = Instance.new("TextBox")
-		mbox.PlaceholderText = "player name"
-		mbox.PlaceholderColor3 = C.faint
-		mbox.Text = ""
-		mbox.ClearTextOnFocus = false
-		mbox.Font = Enum.Font.Gotham
-		mbox.TextSize = 13
-		mbox.TextColor3 = C.text
-		mbox.TextXAlignment = Enum.TextXAlignment.Left
-		mbox.BackgroundColor3 = C.field
-		mbox.BorderSizePixel = 0
-		mbox.Size = UDim2.fromScale(1, 1)
-		mbox.Parent = br
-		corner(mbox, 7)
-		stroke(mbox, C.cardStroke, 1, 0)
-		local mpad = Instance.new("UIPadding")
-		mpad.PaddingLeft = UDim.new(0, 9)
-		mpad.Parent = mbox
-		FND.mimicBox = mbox
-		UI.sliderRow(card, left, "Delay", 1, 30, 5, "x0.1s", function(v) FND.mimicDelay = v / 10 end)
-		UI.switchRow(card, "Mimic", "mimic", function(on)
-			if not on then FND.setMimic(false) return end
-			local p = FND.findPlayer(mbox.Text)
-			if not p then
-				setStatus("No player with that name", C.err)
-				if switches.mimic then switches.mimic.set(1) end
-				return
-			end
-			FND.setMimic(true, p)
-		end)
-	end
-
 	do
 		local card = makeCard(right, "Nearest match")
 		local function info(name)
@@ -5054,54 +5019,55 @@ end)()
 end)()
 
 --------------------------------------------------------------------
--- Mimic: records another player's inputs (walk direction, speed, jumps, action
--- animations) and replays them on your character a short delay later. Your own
--- physics stay in charge, so it walks and jumps normally instead of teleporting.
+-- Troll tab: Mimic. Pick a player from the list; your character follows the path
+-- they walked, a moment behind them, and copies their animations, walk speed and
+-- body turning (so shift lock / first person facing is copied too).
 --------------------------------------------------------------------
 ;(function()
+	local page = newPage(false)
+	FND.trollPage = page
 	FND.mimicOn = false
 	FND.mimicDelay = 0.5
-	local target, recConn
+	local target, recConn, charConn
 	local samples, events, seen, live = {}, {}, {}, {}
-	local origSpeed
+	local saved   -- what we change on your character, so it can be put back
 
-	function FND.findPlayer(text)
-		local q = (text or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-		if q == "" then return nil end
-		local part
-		for _, p in ipairs(Players:GetPlayers()) do
-			if p ~= player then
-				local n, d = p.Name:lower(), p.DisplayName:lower()
-				if n == q or d == q then return p end
-				if not part and (n:sub(1, #q) == q or d:sub(1, #q) == q or n:find(q, 1, true) or d:find(q, 1, true)) then part = p end
-			end
-		end
-		return part
+	local function feetOff(hum, root)
+		if hum.RigType == Enum.HumanoidRigType.R6 then return 3 end
+		return hum.HipHeight + root.Size.Y / 2
 	end
 
+	-- recording the target ---------------------------------------------------------
 	local function record()
 		local char = target and target.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if not hum then return end
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return end
 		local now = os.clock()
-		samples[#samples + 1] = {
-			t = now, dir = hum.MoveDirection, speed = hum.WalkSpeed,
-			jump = hum:GetState() == Enum.HumanoidStateType.Jumping,
-		}
+		samples[#samples + 1] = {t = now, cf = root.CFrame, off = feetOff(hum, root), speed = hum.WalkSpeed}
 		local cutoff = now - FND.mimicDelay - 1
 		while samples[1] and samples[1].t < cutoff do table.remove(samples, 1) end
 
-		-- action animations (emotes, tool swings...), not the normal walk / idle ones
 		local animator = hum:FindFirstChildOfClass("Animator")
 		if animator then
 			local cur = {}
 			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
 				cur[tr] = true
-				if not seen[tr] and tr.Priority.Value >= Enum.AnimationPriority.Action.Value
-					and tr.Priority ~= Enum.AnimationPriority.Core then
-					seen[tr] = true
+				local d = seen[tr]
+				if not d then
+					seen[tr] = {speed = tr.Speed, weight = tr.WeightTarget}
 					events[#events + 1] = {t = now, kind = "play", key = tr,
-						id = tr.Animation and tr.Animation.AnimationId or "", speed = tr.Speed, looped = tr.Looped}
+						id = tr.Animation and tr.Animation.AnimationId or "", speed = tr.Speed,
+						looped = tr.Looped, priority = tr.Priority, weight = tr.WeightTarget}
+				else
+					if math.abs(tr.Speed - d.speed) > 0.05 then
+						d.speed = tr.Speed
+						events[#events + 1] = {t = now, kind = "speed", key = tr, speed = tr.Speed}
+					end
+					if math.abs(tr.WeightTarget - d.weight) > 0.05 then
+						d.weight = tr.WeightTarget
+						events[#events + 1] = {t = now, kind = "weight", key = tr, weight = tr.WeightTarget}
+					end
 				end
 			end
 			for tr in pairs(seen) do
@@ -5113,80 +5079,256 @@ end)()
 		end
 	end
 
-	local function replay()
-		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	-- your character: switch off its own animations / controls while copying -----------
+	local function setupMine()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if not hum then return end
+		saved = saved or {speed = hum.WalkSpeed}
+		hum.PlatformStand = true
+		local animate = char:FindFirstChild("Animate")
+		if animate and animate:IsA("LocalScript") then animate.Disabled = true end
+		local animator = hum:FindFirstChildOfClass("Animator")
+		if animator then
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do pcall(function() tr:Stop(0) end) end
+		end
+		live = {}
+	end
+
+	-- replaying it (after the normal controls each frame) ----------------------------------
+	local function replay()
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not hum or not root then return end
 		local T = os.clock() - FND.mimicDelay
-		local pick
+
+		-- where they were a moment ago (blended between the two nearest recordings = smooth)
+		local a, b
 		for i = #samples, 1, -1 do
-			if samples[i].t <= T then pick = samples[i] break end
+			if samples[i].t <= T then a, b = samples[i], samples[i + 1] break end
 		end
-		if pick then
-			hum.WalkSpeed = pick.speed
-			hum:Move(pick.dir, false)
-			if pick.jump and hum.FloorMaterial ~= Enum.Material.Air then hum.Jump = true end
-		else
-			hum:Move(Vector3.zero, false)
+		a = a or samples[1]
+		if a then
+			local cf, off = a.cf, a.off
+			if b and b.t > a.t then
+				local k = (T - a.t) / (b.t - a.t)
+				cf, off = a.cf:Lerp(b.cf, k), a.off + (b.off - a.off) * k
+			end
+			root.CFrame = cf + Vector3.new(0, feetOff(hum, root) - off, 0)
+			root.AssemblyLinearVelocity = Vector3.zero
+			root.AssemblyAngularVelocity = Vector3.zero
+			hum.WalkSpeed = a.speed
 		end
+
+		-- their animations, as they happened
+		local animator = hum:FindFirstChildOfClass("Animator")
 		while events[1] and events[1].t <= T do
 			local ev = table.remove(events, 1)
-			local animator = hum:FindFirstChildOfClass("Animator")
-			if ev.kind == "play" and animator and ev.id ~= "" then
-				pcall(function()
-					local a = Instance.new("Animation")
-					a.AnimationId = ev.id
-					local tr = animator:LoadAnimation(a)
-					tr.Looped = ev.looped
-					tr.Priority = Enum.AnimationPriority.Action
-					tr:Play()
-					tr:AdjustSpeed(ev.speed)
-					live[ev.key] = tr
-				end)
-			elseif ev.kind == "stop" and live[ev.key] then
-				pcall(function() live[ev.key]:Stop() end)
-				live[ev.key] = nil
+			if animator then
+				if ev.kind == "play" and ev.id ~= "" then
+					pcall(function()
+						local anim = Instance.new("Animation")
+						anim.AnimationId = ev.id
+						local tr = animator:LoadAnimation(anim)
+						tr.Looped = ev.looped
+						tr.Priority = ev.priority
+						tr:Play(0.1, ev.weight, ev.speed)
+						live[ev.key] = tr
+					end)
+				elseif live[ev.key] then
+					local tr = live[ev.key]
+					if ev.kind == "stop" then
+						pcall(function() tr:Stop(0.1) end)
+						live[ev.key] = nil
+					elseif ev.kind == "speed" then
+						pcall(function() tr:AdjustSpeed(ev.speed) end)
+					elseif ev.kind == "weight" then
+						pcall(function() tr:AdjustWeight(ev.weight, 0.1) end)
+					end
+				end
 			end
 		end
 	end
 
-	local function stop()
-		if recConn then recConn:Disconnect() recConn = nil end
-		pcall(function() RunService:UnbindFromRenderStep("KRHUBMimic") end)
-		for _, tr in pairs(live) do pcall(function() tr:Stop() end) end
+	local function restoreMine()
+		for _, tr in pairs(live) do pcall(function() tr:Stop(0.1) end) end
 		live = {}
-		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		if hum then
-			hum:Move(Vector3.zero, false)
-			if origSpeed then hum.WalkSpeed = origSpeed end
+			hum.PlatformStand = false
+			if saved then hum.WalkSpeed = saved.speed end
+			hum:ChangeState(Enum.HumanoidStateType.GettingUp)
 		end
-		origSpeed = nil
+		local animate = char and char:FindFirstChild("Animate")
+		if animate and animate:IsA("LocalScript") then animate.Disabled = false end
+		saved = nil
 	end
 
+	-- the Troll tab ----------------------------------------------------------------------------------
+	local left  = makeColumn(page, "left")
+	local right = makeColumn(page, "right")
+	local selected, nameL, listF, refreshList
+
+	local function row(card, h)
+		local r = Instance.new("Frame")
+		r.BackgroundTransparency = 1
+		r.Size = UDim2.new(1, 0, 0, h)
+		r.LayoutOrder = nextOrder(card)
+		r.Parent = card
+		return r
+	end
+
+	local box
+	do
+		local card = makeCard(left, "Mimic")
+		addHint(card, "Pick a player from the list below, then turn Mimic on.")
+
+		local br = row(card, 30)
+		box = Instance.new("TextBox")
+		box.PlaceholderText = "search players..."
+		box.PlaceholderColor3 = C.faint
+		box.Text = ""
+		box.ClearTextOnFocus = false
+		box.Font = Enum.Font.Gotham
+		box.TextSize = 13
+		box.TextColor3 = C.text
+		box.TextXAlignment = Enum.TextXAlignment.Left
+		box.BackgroundColor3 = C.field
+		box.BorderSizePixel = 0
+		box.Size = UDim2.fromScale(1, 1)
+		box.Parent = br
+		corner(box, 7)
+		stroke(box, C.cardStroke, 1, 0)
+		local bpad = Instance.new("UIPadding")
+		bpad.PaddingLeft = UDim.new(0, 9)
+		bpad.Parent = box
+
+		listF = Instance.new("ScrollingFrame")
+		listF.BackgroundColor3 = C.field
+		listF.BorderSizePixel = 0
+		listF.Size = UDim2.new(1, 0, 0, 132)
+		listF.LayoutOrder = nextOrder(card)
+		listF.CanvasSize = UDim2.new()
+		listF.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		listF.ScrollBarThickness = 3
+		listF.ScrollBarImageColor3 = C.faint
+		listF.Parent = card
+		corner(listF, 7)
+		stroke(listF, C.cardStroke, 1, 0)
+		local lp = Instance.new("UIPadding")
+		lp.PaddingTop, lp.PaddingBottom = UDim.new(0, 4), UDim.new(0, 4)
+		lp.PaddingLeft, lp.PaddingRight = UDim.new(0, 4), UDim.new(0, 4)
+		lp.Parent = listF
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 3)
+		ll.SortOrder = Enum.SortOrder.LayoutOrder
+		ll.Parent = listF
+
+		nameL = addHint(card, "Target: nobody picked")
+
+		UI.sliderRow(card, left, "Delay", 2, 30, 5, "x0.1s", function(v) FND.mimicDelay = v / 10 end)
+		UI.switchRow(card, "Mimic", "mimic", function(on)
+			if not on then FND.setMimic(false) return end
+			if not selected then
+				setStatus("Pick a player from the list first", C.err)
+				if switches.mimic then switches.mimic.set(1) end
+				return
+			end
+			FND.setMimic(true, selected)
+		end)
+	end
+
+	do
+		local hc = makeCard(right, "How it works")
+		addHint(hc, "Your character walks the same path the player walked, a moment behind them, so it follows them around corners and over obstacles.")
+		addHint(hc, "It copies their animations, their walk speed and which way their body faces. Shift lock and first person make a player's body face where the camera points, so that is copied too.")
+		addHint(hc, "Your own movement keys do nothing while it is on. Turn it off to get control back.")
+	end
+
+	refreshList = function()
+		for _, c in ipairs(listF:GetChildren()) do
+			if c:IsA("GuiObject") then c:Destroy() end
+		end
+		local q = box.Text:lower()
+		local plist = {}
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player and (q == "" or p.Name:lower():find(q, 1, true) or p.DisplayName:lower():find(q, 1, true)) then
+				plist[#plist + 1] = p
+			end
+		end
+		table.sort(plist, function(x, y) return x.DisplayName:lower() < y.DisplayName:lower() end)
+		if #plist == 0 then
+			label(listF, {Text = "No players found", TextSize = 12, TextColor3 = C.faint,
+				TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, 0, 0, 22)})
+			return
+		end
+		for i, p in ipairs(plist) do
+			local txt = ("%s  @%s"):format(p.DisplayName, p.Name)
+			local b = makeButton(listF, txt, "ghost", 12)
+			b.Size = UDim2.new(1, 0, 0, 26)
+			b.LayoutOrder = i
+			setToggleStyle(b, p == selected, txt, txt)
+			b.MouseButton1Click:Connect(function()
+				selected = p
+				nameL.Text = "Target: " .. p.DisplayName
+				refreshList()
+				if FND.mimicOn then FND.setMimic(true, p) end
+			end)
+		end
+	end
+	box:GetPropertyChangedSignal("Text"):Connect(function() refreshList() end)
+	Players.PlayerAdded:Connect(function() refreshList() end)
+	Players.PlayerRemoving:Connect(function(p)
+		if p == selected then
+			selected = nil
+			nameL.Text = "Target: nobody picked"
+		end
+		if p == target and FND.mimicOn then FND.setMimic(false) end
+		task.defer(refreshList)
+	end)
+	refreshList()
+
+	-- on / off ------------------------------------------------------------------------------------------
 	function FND.setMimic(state, p)
 		state = state and true or false
 		if state then
-			p = p or target
-			if not p or not p.Parent then setStatus("Pick a player first", C.err) FND.mimicOn = false if updateUI then updateUI() end return end
-			stop()
+			p = p or selected
+			if not p or not p.Parent then
+				setStatus("Pick a player from the list first", C.err)
+				FND.mimicOn = false
+				if updateUI then updateUI() end
+				return
+			end
+			if recConn then recConn:Disconnect() recConn = nil end
+			pcall(function() RunService:UnbindFromRenderStep("KRHUBMimic") end)
+			if FND.mimicOn then restoreMine() end
 			target = p
+			if selected ~= p then selected = p nameL.Text = "Target: " .. p.DisplayName refreshList() end
 			samples, events, seen, live = {}, {}, {}, {}
-			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-			origSpeed = hum and hum.WalkSpeed
 			FND.mimicOn = true
+			setupMine()
 			recConn = RunService.Heartbeat:Connect(record)
-			RunService:BindToRenderStep("KRHUBMimic", Enum.RenderPriority.Last.Value, replay)   -- after the normal controls
+			RunService:BindToRenderStep("KRHUBMimic", Enum.RenderPriority.Last.Value, replay)
 			setStatus("Copying " .. p.DisplayName, C.ok)
 		else
 			if FND.mimicOn then setStatus("Mimic off", C.muted) end
 			FND.mimicOn = false
-			stop()
+			if recConn then recConn:Disconnect() recConn = nil end
+			pcall(function() RunService:UnbindFromRenderStep("KRHUBMimic") end)
+			restoreMine()
 		end
 		if updateUI then updateUI() end
 	end
 
-	Players.PlayerRemoving:Connect(function(p)
-		if p == target and FND.mimicOn then FND.setMimic(false) end
+	-- you respawned while copying: set the new character up again
+	player.CharacterAdded:Connect(function()
+		if not FND.mimicOn then return end
+		task.wait(0.8)
+		if FND.mimicOn then saved = nil setupMine() end
 	end)
+
 	task.spawn(function()
 		while gui.Parent do task.wait(1) end
 		if FND.mimicOn then FND.setMimic(false) end
@@ -5196,8 +5338,8 @@ end)()
 --------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
-local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Finder = 5, Settings = 6}
-local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Finder = FND.page, Settings = settingsPage}
+local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Finder = 5, Troll = 6, Settings = 7}
+local TAB_PAGES = {Normal = normalPage, Friends = friendsPage, All = allPage, ESP = espPage, Finder = FND.page, Troll = FND.trollPage, Settings = settingsPage}
 
 local function paintTabs(name)
 	for key, btn in pairs(TAB_BUTTONS) do
@@ -5983,18 +6125,18 @@ end)()
 		run = function() doEmote() return true, "Loading UGC emote..." end,
 	})
 
-	local TAB_NAMES = {teleport = "Normal", friends = "Friends", player = "All", misc = "All", tools = "All", vc = "All", esp = "ESP", finder = "Finder", settings = "Settings"}
+	local TAB_NAMES = {teleport = "Normal", friends = "Friends", player = "All", misc = "All", tools = "All", vc = "All", esp = "ESP", finder = "Finder", troll = "Troll", settings = "Settings"}
 	add({
-		name = "tab", usage = "tab teleport|friends|player|esp|finder|settings",
+		name = "tab", usage = "tab teleport|friends|player|esp|finder|troll|settings",
 		suggest = function()
 			return {
-				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""}, {text = "finder", desc = ""},
+				{text = "teleport", desc = ""}, {text = "friends", desc = ""}, {text = "misc", desc = ""}, {text = "esp", desc = ""}, {text = "finder", desc = ""}, {text = "troll", desc = ""},
 				{text = "tools", desc = ""}, {text = "settings", desc = ""},
 			}
 		end,
 		run = function(arg)
 			local key = TAB_NAMES[arg:lower()]
-			if not key then return false, "Usage: tab teleport|friends|player|esp|finder|settings" end
+			if not key then return false, "Usage: tab teleport|friends|player|esp|finder|troll|settings" end
 			setVisible(true)
 			switchTab(key)
 			return true, "Opened " .. arg:lower()
