@@ -3551,6 +3551,7 @@ updateUI = function()
 	sw("clickTp", clickTpOn)
 	sw("invisible", invisibleOn)
 	sw("airwalk", FND.airOn)
+	sw("mimic", FND.mimicOn)
 	sw("instantPrompt", FND.instantOn)
 	sw("friendBubbles", bubblesOn)
 	sw("dex", dexOn)
@@ -4662,6 +4663,42 @@ refreshFriends()
 		UI.switchRow(card, "Auto-walk along route", "fnd_walk", function(on) FND.setWalk(on) end)
 	end
 
+	do   -- Mimic: copy another player's moves a moment later
+		local card = makeCard(left, "Mimic")
+		addHint(card, "Repeats another player's moves a little after they do them. You stay where you are. Your own movement keys are ignored while it is on.")
+		local br = row(card, 30)
+		local mbox = Instance.new("TextBox")
+		mbox.PlaceholderText = "player name"
+		mbox.PlaceholderColor3 = C.faint
+		mbox.Text = ""
+		mbox.ClearTextOnFocus = false
+		mbox.Font = Enum.Font.Gotham
+		mbox.TextSize = 13
+		mbox.TextColor3 = C.text
+		mbox.TextXAlignment = Enum.TextXAlignment.Left
+		mbox.BackgroundColor3 = C.field
+		mbox.BorderSizePixel = 0
+		mbox.Size = UDim2.fromScale(1, 1)
+		mbox.Parent = br
+		corner(mbox, 7)
+		stroke(mbox, C.cardStroke, 1, 0)
+		local mpad = Instance.new("UIPadding")
+		mpad.PaddingLeft = UDim.new(0, 9)
+		mpad.Parent = mbox
+		FND.mimicBox = mbox
+		UI.sliderRow(card, left, "Delay", 1, 30, 5, "x0.1s", function(v) FND.mimicDelay = v / 10 end)
+		UI.switchRow(card, "Mimic", "mimic", function(on)
+			if not on then FND.setMimic(false) return end
+			local p = FND.findPlayer(mbox.Text)
+			if not p then
+				setStatus("No player with that name", C.err)
+				if switches.mimic then switches.mimic.set(1) end
+				return
+			end
+			FND.setMimic(true, p)
+		end)
+	end
+
 	do
 		local card = makeCard(right, "Nearest match")
 		local function info(name)
@@ -5017,6 +5054,146 @@ end)()
 end)()
 
 --------------------------------------------------------------------
+-- Mimic: records another player's inputs (walk direction, speed, jumps, action
+-- animations) and replays them on your character a short delay later. Your own
+-- physics stay in charge, so it walks and jumps normally instead of teleporting.
+--------------------------------------------------------------------
+;(function()
+	FND.mimicOn = false
+	FND.mimicDelay = 0.5
+	local target, recConn
+	local samples, events, seen, live = {}, {}, {}, {}
+	local origSpeed
+
+	function FND.findPlayer(text)
+		local q = (text or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+		if q == "" then return nil end
+		local part
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p ~= player then
+				local n, d = p.Name:lower(), p.DisplayName:lower()
+				if n == q or d == q then return p end
+				if not part and (n:sub(1, #q) == q or d:sub(1, #q) == q or n:find(q, 1, true) or d:find(q, 1, true)) then part = p end
+			end
+		end
+		return part
+	end
+
+	local function record()
+		local char = target and target.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum then return end
+		local now = os.clock()
+		samples[#samples + 1] = {
+			t = now, dir = hum.MoveDirection, speed = hum.WalkSpeed,
+			jump = hum:GetState() == Enum.HumanoidStateType.Jumping,
+		}
+		local cutoff = now - FND.mimicDelay - 1
+		while samples[1] and samples[1].t < cutoff do table.remove(samples, 1) end
+
+		-- action animations (emotes, tool swings...), not the normal walk / idle ones
+		local animator = hum:FindFirstChildOfClass("Animator")
+		if animator then
+			local cur = {}
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				cur[tr] = true
+				if not seen[tr] and tr.Priority.Value >= Enum.AnimationPriority.Action.Value
+					and tr.Priority ~= Enum.AnimationPriority.Core then
+					seen[tr] = true
+					events[#events + 1] = {t = now, kind = "play", key = tr,
+						id = tr.Animation and tr.Animation.AnimationId or "", speed = tr.Speed, looped = tr.Looped}
+				end
+			end
+			for tr in pairs(seen) do
+				if not cur[tr] then
+					seen[tr] = nil
+					events[#events + 1] = {t = now, kind = "stop", key = tr}
+				end
+			end
+		end
+	end
+
+	local function replay()
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if not hum then return end
+		local T = os.clock() - FND.mimicDelay
+		local pick
+		for i = #samples, 1, -1 do
+			if samples[i].t <= T then pick = samples[i] break end
+		end
+		if pick then
+			hum.WalkSpeed = pick.speed
+			hum:Move(pick.dir, false)
+			if pick.jump and hum.FloorMaterial ~= Enum.Material.Air then hum.Jump = true end
+		else
+			hum:Move(Vector3.zero, false)
+		end
+		while events[1] and events[1].t <= T do
+			local ev = table.remove(events, 1)
+			local animator = hum:FindFirstChildOfClass("Animator")
+			if ev.kind == "play" and animator and ev.id ~= "" then
+				pcall(function()
+					local a = Instance.new("Animation")
+					a.AnimationId = ev.id
+					local tr = animator:LoadAnimation(a)
+					tr.Looped = ev.looped
+					tr.Priority = Enum.AnimationPriority.Action
+					tr:Play()
+					tr:AdjustSpeed(ev.speed)
+					live[ev.key] = tr
+				end)
+			elseif ev.kind == "stop" and live[ev.key] then
+				pcall(function() live[ev.key]:Stop() end)
+				live[ev.key] = nil
+			end
+		end
+	end
+
+	local function stop()
+		if recConn then recConn:Disconnect() recConn = nil end
+		pcall(function() RunService:UnbindFromRenderStep("KRHUBMimic") end)
+		for _, tr in pairs(live) do pcall(function() tr:Stop() end) end
+		live = {}
+		local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if hum then
+			hum:Move(Vector3.zero, false)
+			if origSpeed then hum.WalkSpeed = origSpeed end
+		end
+		origSpeed = nil
+	end
+
+	function FND.setMimic(state, p)
+		state = state and true or false
+		if state then
+			p = p or target
+			if not p or not p.Parent then setStatus("Pick a player first", C.err) FND.mimicOn = false if updateUI then updateUI() end return end
+			stop()
+			target = p
+			samples, events, seen, live = {}, {}, {}, {}
+			local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+			origSpeed = hum and hum.WalkSpeed
+			FND.mimicOn = true
+			recConn = RunService.Heartbeat:Connect(record)
+			RunService:BindToRenderStep("KRHUBMimic", Enum.RenderPriority.Last.Value, replay)   -- after the normal controls
+			setStatus("Copying " .. p.DisplayName, C.ok)
+		else
+			if FND.mimicOn then setStatus("Mimic off", C.muted) end
+			FND.mimicOn = false
+			stop()
+		end
+		if updateUI then updateUI() end
+	end
+
+	Players.PlayerRemoving:Connect(function(p)
+		if p == target and FND.mimicOn then FND.setMimic(false) end
+	end)
+	task.spawn(function()
+		while gui.Parent do task.wait(1) end
+		if FND.mimicOn then FND.setMimic(false) end
+	end)
+end)()
+
+--------------------------------------------------------------------
 -- Tab switching
 --------------------------------------------------------------------
 local TAB_INDEX = {Normal = 1, Friends = 2, All = 3, ESP = 4, Finder = 5, Settings = 6}
@@ -5334,7 +5511,7 @@ end
 		"freecam noclip fly invisible airwalk instantprompt clicktp antiafk fullbright",
 		"keybinds  bubbles  dex  (on|off)   speed / flyspeed <number>",
 		"find <name>  ·  findclass <class>  ·  clearfind  ·  path  ·  autowalk",
-		"sit <player>  ·  unsit",
+		"sit <player>  ·  unsit  ·  mimic <player>|off",
 		"join <friend>  ·  rejoin  ·  emote",
 		"tab <name>  ·  show  ·  hide",
 		"Tab = complete   Up / Down = choose   Enter = run",
@@ -5683,6 +5860,17 @@ end)()
 	boolCommand("clicktp", "clicktp", function() return clickTpOn end, setClickTp, "Click teleport")
 	boolCommand("invisible", "invisible", function() return invisibleOn end, setInvisible, "Invisible")
 	boolCommand("instantprompt", "instantprompt", function() return FND.instantOn and true or false end, FND.setInstant, "Instant proximity")
+	add({
+		name = "mimic", usage = "mimic <player>|off",
+		suggest = playerCands,
+		run = function(arg)
+			if arg == "" or arg == "off" or arg == "stop" then FND.setMimic(false) return true, "Mimic off" end
+			local t, err = needPlayer(arg, "Usage: mimic <player>")
+			if not t then return false, err end
+			FND.setMimic(true, t)
+			return true, "Copying " .. t.DisplayName
+		end,
+	})
 	boolCommand("airwalk", "airwalk", function() return FND.airOn and true or false end, FND.setAir, "Airwalk")
 	boolCommand("bubbles", "bubbles", function() return bubblesOn end, setBubbles, "Friend avatars")
 	boolCommand("dex", "dex", function() return dexOn end, setDex, "Mini Dex")
